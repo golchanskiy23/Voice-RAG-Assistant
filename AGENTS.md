@@ -4,7 +4,7 @@
 
 ## Источник правды
 
-- Полное ТЗ — `голосовой_rag.org` (FR-*, NFR-*, архитектура, данные, API, env, этапы и критерии приёмки).
+- Полное ТЗ — `docs/spec.org` (FR-*, NFR-*, архитектура, данные, API, env, этапы и критерии приёмки).
 - Перед реализацией фичи найди соответствующие требования (`FR-x.y` / `NFR-n`) и ссылайся на них в коммитах и PR.
 - Если код расходится с ТЗ — не меняй ТЗ молча: укажи расхождение и спроси.
 
@@ -27,7 +27,23 @@ Python 3.12, FastAPI, Pydantic v2 + pydantic-settings, asyncpg/SQLAlchemy, Postg
 Redis (async), OpenAI SDK, GigaChat SDK, transformers + PyTorch (e5, BGE-M3, bge-reranker), faster-whisper,
 silero-vad, Silero TTS, ffmpeg, aiogram 3, tiktoken, pymupdf, structlog, pytest, ruff, mypy, Docker Compose, Caddy.
 
-## Структура кода
+## Структура репозитория
+
+```
+frontend/              # Frontend-приложение (веб-клиент для голоса, сценарий С3)
+services/              # Backend-сервисы
+  api/                 # FastAPI: REST, WebSocket, Telegram webhook
+contracts/             # Согласованные API, схемы и примеры ответов (OpenAPI, события WS)
+docs/                  # Требования (spec.org) и общая документация
+data/                  # Подготовленные демо-данные
+.agents/skills/        # Навыки с указанной областью применения
+AGENTS.md              # Общие инструкции проекта
+README.md              # Описание и общий запуск
+docker-compose.yml     # Запуск всего решения
+.env.example           # Пример конфигурации без секретов
+```
+
+Структура `services/api/`:
 
 ```
 app/
@@ -40,6 +56,9 @@ scripts/      index.py, eval_retrieval.py, eval_latency.py
 eval/         questions.jsonl, results/<дата>_<конфиг>.json
 tests/
 ```
+
+- Изменение API или событий WebSocket — сначала обнови `contracts/`, затем код сервиса и клиента.
+- Новый навык — в `.agents/skills/<имя>/SKILL.md`, в начале указать область применения.
 
 ## Правила кода
 
@@ -56,11 +75,12 @@ tests/
 ## Команды
 
 ```bash
-docker compose up -d                 # поднять api, postgres(pgvector), qdrant, redis
+docker compose up -d                 # из корня: поднять api, postgres(pgvector), qdrant, redis
+cd services/api                      # остальные команды — отсюда
 uv run pytest                        # тесты
 uv run ruff check . && uv run ruff format --check .
 uv run mypy app/
-uv run python scripts/index.py data/ # индексация папки
+uv run python scripts/index.py ../../data/  # индексация папки
 uv run python scripts/eval_retrieval.py --config <name>   # recall@1/3/5, MRR
 uv run python scripts/eval_latency.py                     # p50/p95 по этапам
 ```
@@ -77,4 +97,4 @@ uv run python scripts/eval_latency.py                     # p50/p95 по эта�
 ## Git
 
 - Коммиты небольшие, сообщение на русском или английском, со ссылкой на требование: `feat(search): RRF hybrid (FR-2.3)`.
-- Не коммитить `.env`, модели, `data/` с документами, большие бинарники.
+- Не коммитить `.env`, веса моделей, большие бинарники. В `data/` — только небольшие демо-документы, которые можно публиковать.
