@@ -13,5 +13,5 @@
 - Субагенты — `.claude/agents/`:
   - `rag-reviewer` — ревью изменений на соответствие ТЗ и правилам AGENTS.md;
   - `eval-analyst` — анализ результатов eval и разбор промахов поиска;
-  - `spec-navigator` — поиск нужных требований в `docs/spec.org`.
+  - `spec-navigator` — поиск нужных требований в `docs/spec.md`.
 - Перед завершением задачи с кодом (в `services/api/`): `ruff check`, `mypy app/`, `pytest` по затронутым модулям.
