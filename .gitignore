@@ -20,3 +20,6 @@ models/
 *.bin
 *.safetensors
 *.onnx
+
+# Личные учебные материалы
+notes/
