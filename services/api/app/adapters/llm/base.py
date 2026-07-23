@@ -1,3 +1,4 @@
+from collections.abc import AsyncIterator
 from typing import Protocol
 
 
@@ -6,6 +7,8 @@ class LLMClient(Protocol):
     def name(self) -> str: ...
 
     async def complete(self, prompt: str) -> str: ...
+
+    def stream(self, prompt: str) -> AsyncIterator[str]: ...
 
     async def is_ready(self) -> bool: ...
 
