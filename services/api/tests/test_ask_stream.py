@@ -5,9 +5,10 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from app.adapters.llm.stub import NO_ANSWER, StubLLMClient
+from app.adapters.llm.stub import StubLLMClient
 from app.api.sse import stream_sse
 from app.main import create_app
+from app.services.llm_answer import NO_ANSWER
 from app.services.rag import FinalEvent, StreamEvent, TokenEvent
 
 
