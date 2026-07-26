@@ -1,9 +1,15 @@
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from typing import TypedDict
 
 from app.adapters.llm.base import LLMClient
 from app.services.llm_answer import NO_ANSWER, AnswerValidationError, LLMAnswer, parse_llm_answer
+
+
+class Latency(TypedDict, total=False):
+    first_token: float
+    llm: float
 
 
 @dataclass(frozen=True)
@@ -19,7 +25,7 @@ class Answer:
     text: str
     sources: list[Source] = field(default_factory=list)
     confidence: float = 0.0
-    latency_ms: dict[str, float] = field(default_factory=dict)
+    latency_ms: Latency = field(default_factory=Latency)
 
 
 @dataclass(frozen=True)
@@ -31,7 +37,7 @@ class TokenEvent:
 class FinalEvent:
     sources: list[Source]
     confidence: float
-    latency_ms: dict[str, float]
+    latency_ms: Latency
 
 
 StreamEvent = TokenEvent | FinalEvent
@@ -74,9 +80,10 @@ class RAGService:
 
     async def stream(self, question: str) -> AsyncGenerator[StreamEvent]:
         start = time.perf_counter()
-        latency: dict[str, float] = {}
+        latency: Latency = {}
         async for token in self._llm.stream(question):
-            latency.setdefault("first_token", elapsed_ms(start))
+            if "first_token" not in latency:
+                latency["first_token"] = elapsed_ms(start)
             yield TokenEvent(token)
         latency["llm"] = elapsed_ms(start)
         yield FinalEvent(sources=[], confidence=0.0, latency_ms=latency)
