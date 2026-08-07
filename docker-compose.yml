@@ -1,20 +1,34 @@
 name: voice-rag
 
+x-database-url: &database-url postgresql+asyncpg://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag}@postgres:5432/${POSTGRES_DB:-rag}
+
 services:
   api:
     build: ./services/api
+    image: voice-rag-api:local
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-rag}:${POSTGRES_PASSWORD:-rag}@postgres:5432/${POSTGRES_DB:-rag}
+      DATABASE_URL: *database-url
       QDRANT_URL: http://qdrant:6333
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       qdrant:
         condition: service_healthy
     restart: unless-stopped
+
+  migrate:
+    image: voice-rag-api:local
+    pull_policy: never
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   postgres:
     image: pgvector/pgvector:0.8.0-pg17

@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.adapters.llm.stub import StubLLMClient
 from app.api.routes import health
-from app.main import create_app
+from tests.factories import FakeDatabase, build_app
 
 
 def test_health(client: TestClient) -> None:
@@ -19,7 +19,7 @@ def test_ready_when_llm_available(client: TestClient) -> None:
     response = client.get("/ready")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "checks": {"llm": True}}
+    assert response.json() == {"status": "ready", "checks": {"postgres": True, "llm": True}}
 
 
 class UnavailableLLM(StubLLMClient):
@@ -28,15 +28,15 @@ class UnavailableLLM(StubLLMClient):
 
 
 def test_ready_when_llm_unavailable() -> None:
-    with TestClient(create_app(llm_factory=UnavailableLLM)) as client:
+    with TestClient(build_app(llm_factory=UnavailableLLM)) as client:
         response = client.get("/ready")
 
     assert response.status_code == 503
-    assert response.json() == {"status": "not_ready", "checks": {"llm": False}}
+    assert response.json() == {"status": "not_ready", "checks": {"postgres": True, "llm": False}}
 
 
 def test_lifespan_creates_single_client_and_closes_it() -> None:
-    app = create_app()
+    app = build_app()
     with TestClient(app) as client:
         llm = app.state.llm
         client.get("/ready")
@@ -63,8 +63,24 @@ def test_ready_treats_timeout_and_errors_as_not_ready(
 ) -> None:
     monkeypatch.setattr(health, "READY_TIMEOUT_SECONDS", 0.05)
 
-    with TestClient(create_app(llm_factory=llm_factory)) as client:
+    with TestClient(build_app(llm_factory=llm_factory)) as client:
         response = client.get("/ready")
 
     assert response.status_code == 503
-    assert response.json()["checks"] == {"llm": False}
+    assert response.json()["checks"] == {"postgres": True, "llm": False}
+
+
+def test_ready_reports_postgres_unavailable() -> None:
+    with TestClient(build_app(database=FakeDatabase(ready=False))) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"] == {"postgres": False, "llm": True}
+
+
+def test_lifespan_closes_database() -> None:
+    database = FakeDatabase()
+    with TestClient(build_app(database=database)):
+        assert database.closed is False
+
+    assert database.closed is True
