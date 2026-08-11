@@ -5,14 +5,14 @@ from alembic import context
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.core.config import get_settings
+from app.core.config import DatabaseSettings
 
 if context.config.config_file_name is not None:
     fileConfig(context.config.config_file_name)
 
 
 def database_url() -> str:
-    return str(get_settings().database_url)
+    return str(DatabaseSettings().database_url)
 
 
 def run_migrations_offline() -> None:

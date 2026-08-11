@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.adapters.llm.stub import StubLLMClient
 from app.api.routes import health
-from tests.factories import FakeDatabase, build_app
+from tests.factories import FakeDatabase, FakeQdrant, build_app
 
 
 def test_health(client: TestClient) -> None:
@@ -19,7 +19,10 @@ def test_ready_when_llm_available(client: TestClient) -> None:
     response = client.get("/ready")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ready", "checks": {"postgres": True, "llm": True}}
+    assert response.json() == {
+        "status": "ready",
+        "checks": {"postgres": True, "qdrant": True, "llm": True},
+    }
 
 
 class UnavailableLLM(StubLLMClient):
@@ -32,7 +35,10 @@ def test_ready_when_llm_unavailable() -> None:
         response = client.get("/ready")
 
     assert response.status_code == 503
-    assert response.json() == {"status": "not_ready", "checks": {"postgres": True, "llm": False}}
+    assert response.json() == {
+        "status": "not_ready",
+        "checks": {"postgres": True, "qdrant": True, "llm": False},
+    }
 
 
 def test_lifespan_creates_single_client_and_closes_it() -> None:
@@ -67,7 +73,7 @@ def test_ready_treats_timeout_and_errors_as_not_ready(
         response = client.get("/ready")
 
     assert response.status_code == 503
-    assert response.json()["checks"] == {"postgres": True, "llm": False}
+    assert response.json()["checks"] == {"postgres": True, "qdrant": True, "llm": False}
 
 
 def test_ready_reports_postgres_unavailable() -> None:
@@ -75,7 +81,7 @@ def test_ready_reports_postgres_unavailable() -> None:
         response = client.get("/ready")
 
     assert response.status_code == 503
-    assert response.json()["checks"] == {"postgres": False, "llm": True}
+    assert response.json()["checks"] == {"postgres": False, "qdrant": True, "llm": True}
 
 
 def test_lifespan_closes_database() -> None:
@@ -84,3 +90,19 @@ def test_lifespan_closes_database() -> None:
         assert database.closed is False
 
     assert database.closed is True
+
+
+def test_ready_reports_qdrant_unavailable() -> None:
+    with TestClient(build_app(qdrant=FakeQdrant(ready=False))) as client:
+        response = client.get("/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"] == {"postgres": True, "qdrant": False, "llm": True}
+
+
+def test_lifespan_closes_qdrant() -> None:
+    qdrant = FakeQdrant()
+    with TestClient(build_app(qdrant=qdrant)):
+        assert qdrant.closed is False
+
+    assert qdrant.closed is True

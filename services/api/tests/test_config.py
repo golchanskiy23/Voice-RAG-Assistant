@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from app.core.config import Settings
-from tests.factories import TEST_DATABASE_URL, build_app
+from app.core.config import DatabaseSettings, Settings
+from tests.factories import TEST_DATABASE_URL, TEST_QDRANT_URL, build_app
 
 
 @pytest.fixture(autouse=True)
@@ -13,6 +13,7 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
+    monkeypatch.setenv("QDRANT_URL", TEST_QDRANT_URL)
 
 
 def test_defaults() -> None:
@@ -44,6 +45,13 @@ def test_rejects_non_postgres_url(monkeypatch: pytest.MonkeyPatch) -> None:
         Settings()
 
 
+def test_requires_qdrant_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("QDRANT_URL")
+
+    with pytest.raises(ValidationError, match="qdrant_url"):
+        Settings()
+
+
 def test_rejects_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "unknown")
 
@@ -57,3 +65,9 @@ def test_app_exposes_settings_from_lifespan() -> None:
 
     with TestClient(app):
         assert app.state.settings is settings
+
+
+def test_database_settings_do_not_require_qdrant(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("QDRANT_URL")
+
+    assert str(DatabaseSettings().database_url) == TEST_DATABASE_URL
