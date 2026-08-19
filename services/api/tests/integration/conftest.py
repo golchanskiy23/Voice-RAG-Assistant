@@ -9,6 +9,7 @@ from testcontainers.community.postgres import PostgresContainer
 from testcontainers.community.qdrant import QdrantContainer
 
 from app.core.config import Settings
+from tests.factories import TEST_ADMIN_API_KEY
 
 POSTGRES_IMAGE = "pgvector/pgvector:0.8.0-pg17"
 QDRANT_IMAGE = "qdrant/qdrant:v1.20.0"
@@ -66,4 +67,8 @@ def migrated_database_url(database_url: str) -> str:
 
 @pytest.fixture
 def settings(migrated_database_url: str, qdrant_url: str) -> Settings:
-    return Settings(database_url=migrated_database_url, qdrant_url=qdrant_url)
+    return Settings(
+        database_url=migrated_database_url,
+        qdrant_url=qdrant_url,
+        admin_api_key=TEST_ADMIN_API_KEY,
+    )

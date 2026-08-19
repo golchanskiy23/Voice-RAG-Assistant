@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.core.config import DatabaseSettings, Settings
-from tests.factories import TEST_DATABASE_URL, TEST_QDRANT_URL, build_app
+from tests.factories import TEST_ADMIN_API_KEY, TEST_DATABASE_URL, TEST_QDRANT_URL, build_app
 
 
 @pytest.fixture(autouse=True)
@@ -14,6 +14,7 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.delenv("LLM_PROVIDER", raising=False)
     monkeypatch.setenv("DATABASE_URL", TEST_DATABASE_URL)
     monkeypatch.setenv("QDRANT_URL", TEST_QDRANT_URL)
+    monkeypatch.setenv("ADMIN_API_KEY", TEST_ADMIN_API_KEY)
 
 
 def test_defaults() -> None:
@@ -50,6 +51,17 @@ def test_requires_qdrant_url(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ValidationError, match="qdrant_url"):
         Settings()
+
+
+def test_requires_admin_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ADMIN_API_KEY")
+
+    with pytest.raises(ValidationError, match="admin_api_key"):
+        Settings()
+
+
+def test_admin_api_key_is_hidden_in_repr() -> None:
+    assert TEST_ADMIN_API_KEY not in repr(Settings())
 
 
 def test_rejects_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
