@@ -91,6 +91,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy app tests migrations
 DATABASE_URL=postgresql+asyncpg://rag:rag@localhost:5433/rag uv run alembic upgrade head
 uv run alembic revision -m "<описание>"   # новая миграция, SQL пишется вручную
+uvx pre-commit install && uvx pre-commit run --all-files   # из корня: хуки ruff, ruff format, mypy и базовые проверки
 uv run python scripts/index.py ../../data/  # индексация папки
 uv run python scripts/eval_retrieval.py --config <name>   # recall@1/3/5, MRR
 uv run python scripts/eval_latency.py                     # p50/p95 по этапам

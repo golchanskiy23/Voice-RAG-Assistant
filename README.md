@@ -6,7 +6,8 @@
 RAG реализован вручную, без LangChain, LlamaIndex и подобных фреймворков. Качество поиска и задержка голосового
 ответа измеряются воспроизводимым eval.
 
-> **Статус:** в разработке. Полное техническое задание — [`docs/spec.md`](docs/spec.md).
+> **Статус:** в разработке — готов каркас сервиса, инфраструктура и загрузка документов; поиск, LLM и голос впереди.
+> Полное техническое задание — [`docs/spec.md`](docs/spec.md).
 
 ## Возможности
 
@@ -65,64 +66,104 @@ LLM → валидация ответа → (TTS)**.
 ## Структура репозитория
 
 ```
-frontend/              # Веб-клиент для голоса
-services/api/          # Backend: FastAPI, RAG, голос, Telegram webhook
-contracts/             # OpenAPI, события WebSocket, примеры ответов
-docs/                  # ТЗ и документация
-data/                  # Демо-документы
+services/api/          # Backend: FastAPI-сервис
+  app/                 # api, services, adapters, repositories, core
+  migrations/          # Alembic
+  tests/               # unit и integration (testcontainers)
+docs/spec.md           # Техническое задание
 .agents/skills/        # Навыки AI-агентов
 AGENTS.md              # Инструкции для AI-агентов
-docker-compose.yml     # Запуск всего решения
+docker-compose.yml     # api, migrate, postgres (pgvector), qdrant
 .env.example           # Пример конфигурации
 ```
 
+По мере развития появятся `frontend/` (веб-клиент для голоса), `contracts/` (OpenAPI, события WebSocket) и `data/` (демо-документы).
+
 ## Запуск
 
+Нужен Docker с Compose v2.
+
 ```bash
-cp .env.example .env          # указать OPENAI_API_KEY / GIGACHAT_CREDENTIALS, TELEGRAM_TOKEN, ADMIN_API_KEY
-docker compose up -d          # api, postgres (pgvector), qdrant, redis
+docker compose up -d --build --wait
 ```
 
-После запуска:
-
-- OpenAPI-документация — http://localhost:8000/docs
-- Проверка готовности — `GET /ready`
-
-Индексация папки с документами:
+Команда соберёт образ, поднимет Postgres и Qdrant, применит миграции (сервис `migrate`) и запустит api.
+Без `.env` используются значения для разработки. Для своих значений: `cp .env.example .env` и отредактировать.
 
 ```bash
-cd services/api
-uv run python scripts/index.py ../../data/
+curl localhost:8000/health    # {"status":"ok"}
+curl localhost:8000/ready     # {"status":"ready","checks":{"postgres":true,"qdrant":true,"llm":true}}
+```
+
+- OpenAPI-документация — http://localhost:8000/docs
+- Остановить: `docker compose down` (данные сохраняются), удалить данные: `docker compose down -v`
+
+Загрузка документа:
+
+```bash
+curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@guide.md
+# {"id":"...","chunks":0,"status":"created"}
 ```
 
 ## API
 
-| Метод | Путь | Назначение |
-|-------|------|------------|
-| POST | `/documents` | Загрузить PDF/Markdown (API-ключ) |
-| GET | `/documents` | Список документов |
-| DELETE | `/documents/{id}` | Удалить документ и его чанки |
-| POST | `/search` | Поиск чанков: `{query, k, doc_ids?, mode}` |
-| POST | `/ask` | Ответ целиком: `{answer, sources, confidence, latency}` |
-| POST | `/ask/stream` | SSE: `token`, `sources`, `done` |
-| WS | `/ws/voice` | Аудио → `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `done` |
-| POST | `/telegram/webhook` | Обновления Telegram |
-| GET | `/health`, `/ready` | Живость и готовность зависимостей |
+| Метод | Путь | Назначение | Статус |
+|-------|------|------------|--------|
+| GET | `/health` | Процесс жив | ✅ |
+| GET | `/ready` | Postgres, Qdrant и LLM доступны, иначе 503 | ✅ |
+| POST | `/documents` | Загрузить PDF/Markdown до 20 МБ, API-ключ в `X-API-Key`; повторный файл → тот же `id` | ✅ без индексации |
+| POST | `/ask` | Ответ целиком: `{answer, sources, confidence, latency}` | ✅ заглушка LLM |
+| POST | `/ask/stream` | SSE: `token`, `sources`, `done`, `error` | ✅ заглушка LLM |
+| GET | `/documents` | Список документов | план |
+| DELETE | `/documents/{id}` | Удалить документ и его чанки | план |
+| POST | `/search` | Поиск чанков: `{query, k, doc_ids?, mode}` | план |
+| WS | `/ws/voice` | Аудио → `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `done` | план |
+| POST | `/telegram/webhook` | Обновления Telegram | план |
 
 Ошибки возвращаются в едином формате: `{"error": {"code", "message", "request_id"}}`.
+Каждый ответ содержит заголовок `X-Request-ID`.
 
 ## Конфигурация
 
-Основные переменные (полный список — в [`docs/spec.md`](docs/spec.md), раздел 9):
+Переменные читаются из окружения (в compose — из `.env` в корне):
 
-| Переменная | Значения | Назначение |
-|------------|----------|------------|
-| `LLM_PROVIDER`, `LLM_FALLBACK` | `openai`, `gigachat` | Основной и запасной LLM |
-| `EMBEDDER` | `openai`, `e5`, `bge-m3` | Модель эмбеддингов |
-| `VECTOR_STORE` | `qdrant`, `pgvector` | Векторное хранилище |
-| `RERANK_ENABLED` | `true` / `false` | Reranker на top-N |
-| `CHUNK_SIZE`, `CHUNK_OVERLAP` | токены | Параметры чанкинга |
-| `WHISPER_MODEL` | `small`, `medium`, … | Модель распознавания речи |
+| Переменная | По умолчанию в compose | Назначение |
+|------------|------------------------|------------|
+| `ADMIN_API_KEY` | `dev-admin-key` | Ключ для `/documents` |
+| `LLM_PROVIDER` | `stub` | Реализация LLM (пока только заглушка) |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `rag` | Учётные данные Postgres |
+| `API_PORT` | `8000` | Порт api на хосте |
+| `POSTGRES_PORT`, `QDRANT_PORT` | `5433`, `6334` | Порты Postgres и Qdrant на `127.0.0.1` |
+
+`DATABASE_URL` и `QDRANT_URL` compose собирает сам. При запуске сервиса без compose они обязательны.
+Полный список будущих переменных — в [`docs/spec.md`](docs/spec.md), раздел 9.
+
+## Разработка
+
+Нужен [uv](https://docs.astral.sh/uv/). Команды — из `services/api`:
+
+```bash
+uv sync                          # зависимости
+uv run pytest                    # unit-тесты
+uv run pytest -m integration     # интеграционные: Postgres и Qdrant в testcontainers, нужен Docker
+uv run ruff check . && uv run ruff format --check .
+uv run mypy app tests migrations
+```
+
+Миграции:
+
+```bash
+uv run alembic revision -m "описание"                                   # новая миграция
+docker compose run --rm migrate                                          # применить в compose
+DATABASE_URL=postgresql+asyncpg://rag:rag@localhost:5433/rag uv run alembic upgrade head
+```
+
+Pre-commit (из корня репозитория): trailing whitespace, YAML/TOML, приватные ключи, ruff, ruff format, mypy.
+
+```bash
+uvx pre-commit install           # хуки на git commit
+uvx pre-commit run --all-files
+```
 
 ## Оценка качества
 
