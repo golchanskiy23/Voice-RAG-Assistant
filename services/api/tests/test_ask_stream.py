@@ -7,9 +7,9 @@ from fastapi.testclient import TestClient
 
 from app.adapters.llm.stub import StubLLMClient
 from app.api.sse import stream_sse
-from app.main import create_app
 from app.services.llm_answer import NO_ANSWER
 from app.services.rag import FinalEvent, StreamEvent, TokenEvent
+from tests.factories import build_app
 
 
 def parse_sse(body: str) -> list[tuple[str, dict[str, Any]]]:
@@ -53,7 +53,7 @@ class FailingLLM(StubLLMClient):
 
 def test_stream_reports_error_event_mid_stream() -> None:
     with (
-        TestClient(create_app(llm_factory=FailingLLM)) as client,
+        TestClient(build_app(llm_factory=FailingLLM)) as client,
         client.stream(
             "POST", "/ask/stream", json={"question": "q"}, headers={"X-Request-ID": "req-9"}
         ) as response,

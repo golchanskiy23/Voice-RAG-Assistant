@@ -1,3 +1,4 @@
+import uuid
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -12,6 +13,12 @@ class HealthResponse(BaseModel):
 class ReadyResponse(BaseModel):
     status: Literal["ready", "not_ready"]
     checks: dict[str, bool]
+
+
+class DocumentUploadResponse(BaseModel):
+    id: uuid.UUID
+    chunks: int
+    status: Literal["created", "exists"]
 
 
 class AskRequest(BaseModel):
