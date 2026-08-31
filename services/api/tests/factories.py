@@ -3,6 +3,8 @@ from collections.abc import Callable
 
 from fastapi import FastAPI
 
+from app.adapters.embedders.base import Embedder
+from app.adapters.embedders.hashing import HashingEmbedder
 from app.adapters.llm.base import LLMClient
 from app.adapters.llm.stub import StubLLMClient
 from app.api.deps import get_document_repository
@@ -73,6 +75,7 @@ def build_app(
     qdrant: FakeQdrant | None = None,
     settings: Settings | None = None,
     documents: DocumentRepository | None = None,
+    embedder_factory: Callable[[], Embedder] = HashingEmbedder,
 ) -> FastAPI:
     fake_database = database or FakeDatabase()
     fake_qdrant = qdrant or FakeQdrant()
@@ -82,6 +85,7 @@ def build_app(
         llm_factory=llm_factory,
         database_factory=lambda _: fake_database,
         qdrant_factory=lambda _: fake_qdrant,
+        embedder_factory=embedder_factory,
     )
     app.dependency_overrides[get_document_repository] = lambda: repository
     return app

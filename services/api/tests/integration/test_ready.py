@@ -32,7 +32,7 @@ def test_ready_with_real_dependencies(settings: Settings) -> None:
     status, checks = get_ready(settings)
 
     assert status == 200
-    assert checks == {"postgres": True, "qdrant": True, "llm": True}
+    assert checks == {"postgres": True, "qdrant": True, "embedder": True, "llm": True}
 
 
 @pytest.mark.parametrize("resource", ["postgres", "qdrant"])
