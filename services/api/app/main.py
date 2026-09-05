@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.adapters.base import Resource
-from app.adapters.embedders.base import Embedder, ensure_dimension
+from app.adapters.embedders.base import Embedder, ensure_chunk_fits, ensure_dimension
 from app.adapters.embedders.registry import embedder_registry
 from app.adapters.llm.base import LLMClient
 from app.adapters.llm.registry import llm_registry
@@ -30,6 +30,7 @@ def create_app(
             embedder_factory() if embedder_factory else embedder_registry.create(resolved.embedder)
         )
         ensure_dimension(embedder)
+        ensure_chunk_fits(embedder, resolved.chunk_size)
         llm = llm_factory() if llm_factory else llm_registry.create(resolved.llm_provider)
         database = (
             database_factory(resolved) if database_factory else Database(str(resolved.database_url))
