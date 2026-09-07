@@ -10,6 +10,7 @@ from app.adapters.llm.base import LLMClient
 from app.core.config import Settings
 from app.core.database import Database
 from app.repositories.documents import DocumentRepository, SqlDocumentRepository
+from app.services.chunking import Chunker
 from app.services.ingestion import IngestionService
 from app.services.rag import RAGService
 
@@ -50,10 +51,19 @@ def get_rag_service(llm: Annotated[LLMClient, Depends(get_llm)]) -> RAGService:
     return RAGService(llm)
 
 
+def get_chunker(
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
+) -> Chunker:
+    return Chunker(embedder.count_tokens, settings.chunk_size, settings.chunk_overlap)
+
+
 def get_ingestion_service(
     documents: Annotated[DocumentRepository, Depends(get_document_repository)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
+    chunker: Annotated[Chunker, Depends(get_chunker)],
 ) -> IngestionService:
-    return IngestionService(documents)
+    return IngestionService(documents, embedder, chunker)
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]

@@ -32,10 +32,11 @@ async def upload_document(
 ) -> DocumentUploadResponse:
     content = await read_limited(file, ingestion.MAX_UPLOAD_BYTES)
     result = await service.upload(file.filename or "", content)
-    if not result.created:
+    if result.status == "exists":
         response.status_code = status.HTTP_200_OK
     return DocumentUploadResponse(
         id=result.document.id,
-        chunks=0,
-        status="created" if result.created else "exists",
+        chunks=result.document.chunks,
+        pages=result.document.pages,
+        status=result.status,
     )

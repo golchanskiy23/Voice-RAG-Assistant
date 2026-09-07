@@ -1,5 +1,5 @@
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from fastapi import FastAPI
 
@@ -12,7 +12,13 @@ from app.core.config import Settings
 from app.core.database import Database
 from app.core.qdrant import Qdrant
 from app.main import create_app
-from app.repositories.documents import DocumentRepository, NewDocument, StoredDocument
+from app.repositories.documents import (
+    DocumentRepository,
+    NewChunk,
+    NewDocument,
+    SaveStatus,
+    StoredDocument,
+)
 
 TEST_DATABASE_URL = "postgresql+asyncpg://test:test@localhost:1/test"
 TEST_QDRANT_URL = "http://localhost:1"
@@ -58,15 +64,31 @@ class FakeQdrant(Qdrant):
 class InMemoryDocumentRepository:
     def __init__(self) -> None:
         self.documents: dict[str, StoredDocument] = {}
+        self.chunks: dict[uuid.UUID, list[NewChunk]] = {}
 
-    async def get_or_create(self, document: NewDocument) -> tuple[StoredDocument, bool]:
+    async def find_by_sha256(self, sha256: str) -> StoredDocument | None:
+        return self.documents.get(sha256)
+
+    async def save(
+        self, document: NewDocument, chunks: Sequence[NewChunk]
+    ) -> tuple[StoredDocument, SaveStatus]:
         if document.sha256 in self.documents:
-            return self.documents[document.sha256], False
+            return self.documents[document.sha256], "exists"
+        old = [d for d in self.documents.values() if d.filename == document.filename]
+        for stale in old:
+            del self.documents[stale.sha256]
+            self.chunks.pop(stale.id, None)
         stored = StoredDocument(
-            id=uuid.uuid4(), filename=document.filename, sha256=document.sha256, mime=document.mime
+            id=uuid.uuid4(),
+            filename=document.filename,
+            sha256=document.sha256,
+            mime=document.mime,
+            pages=document.pages,
+            chunks=len(chunks),
         )
         self.documents[document.sha256] = stored
-        return stored, True
+        self.chunks[stored.id] = list(chunks)
+        return stored, "replaced" if old else "created"
 
 
 def build_app(
