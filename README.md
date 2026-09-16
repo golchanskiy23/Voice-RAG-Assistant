@@ -6,7 +6,8 @@
 RAG реализован вручную, без LangChain, LlamaIndex и подобных фреймворков. Качество поиска и задержка голосового
 ответа измеряются воспроизводимым eval.
 
-> **Статус:** в разработке — готовы каркас сервиса, инфраструктура, загрузка и индексация документов в Postgres; поиск, LLM и голос впереди.
+> **Статус:** в разработке — готовы каркас сервиса, инфраструктура, загрузка и индексация документов, векторный поиск
+> top-k в Qdrant и pgvector за общим интерфейсом; гибридный поиск, LLM и голос впереди.
 > Полное техническое задание — [`docs/spec.md`](docs/spec.md).
 
 ## Возможности
@@ -111,12 +112,12 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 |-------|------|------------|--------|
 | GET | `/health` | Процесс жив | ✅ |
 | GET | `/ready` | Postgres, Qdrant, эмбеддер и LLM доступны, иначе 503 | ✅ |
-| POST | `/documents` | Загрузить PDF/Markdown до 20 МБ (API-ключ в `X-API-Key`): парсинг, чанкинг, эмбеддинги, запись чанков в Postgres; тот же файл → тот же `id`, новая версия с тем же именем заменяет старую | ✅ |
+| POST | `/documents` | Загрузить PDF/Markdown до 20 МБ (API-ключ в `X-API-Key`): парсинг, чанкинг, эмбеддинги, запись чанков в Postgres (+ pgvector) и Qdrant; тот же файл → тот же `id`, новая версия с тем же именем заменяет старую | ✅ |
 | POST | `/ask` | Ответ целиком: `{answer, sources, confidence, latency}` | ✅ заглушка LLM |
 | POST | `/ask/stream` | SSE: `token`, `sources`, `done`, `error` | ✅ заглушка LLM |
 | GET | `/documents` | Список документов | план |
 | DELETE | `/documents/{id}` | Удалить документ и его чанки | план |
-| POST | `/search` | Поиск чанков: `{query, k, doc_ids?, mode}` | план |
+| POST | `/search` | Поиск top-k чанков: `{query, k, doc_ids?, mode, store?}` → `{chunks: [{id, document_id, filename, ord, text, page, section, score, source}], store, latency}` | ✅ `mode=vector` |
 | WS | `/ws/voice` | Аудио → `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `done` | план |
 | POST | `/telegram/webhook` | Обновления Telegram | план |
 
@@ -131,7 +132,12 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 |------------|------------------------|------------|
 | `ADMIN_API_KEY` | `dev-admin-key` | Ключ для `/documents` |
 | `LLM_PROVIDER` | `stub` | Реализация LLM (пока только заглушка) |
-| `EMBEDDER` | `hashing` | Эмбеддер; `hashing` — feature hashing без модели, для разработки до подключения e5/BGE-M3 |
+| `EMBEDDER` | `hashing` | Эмбеддер: `hashing` — feature hashing без модели, для разработки; `openai` — OpenAI embeddings |
+| `OPENAI_API_KEY` | — | Обязателен при `EMBEDDER=openai` |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Модель OpenAI; размерность приводится к 1024 параметром `dimensions` |
+| `EMBEDDING_BATCH_SIZE` | `128` | Текстов в одном запросе к эмбеддеру |
+| `EMBEDDING_CACHE_SIZE` | `10000` | LRU-кэш эмбеддингов по SHA-256 текста; `0` — выключен |
+| `VECTOR_STORE` | `qdrant` | Хранилище для `/search` по умолчанию: `qdrant` или `pgvector`; в запросе переопределяется полем `store` |
 | `CHUNK_SIZE`, `CHUNK_OVERLAP` | `300`, `45` | Размер чанка и перекрытие в токенах эмбеддера (см. «Обработка документов») |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `rag` | Учётные данные Postgres |
 | `API_PORT` | `8000` | Порт api на хосте |
@@ -171,6 +177,53 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
   в одном из соседей. Перекрытие — целыми предложениями, без обрезков.
 - **Это гипотеза, а не результат.** Значение будет проверено на eval-наборе (этап 2): recall@5 для 150 / 300 / 500
   токенов, итог — в разделе «Оценка качества».
+
+## Векторный поиск
+
+Эмбеддер и хранилище — за `Protocol` (`Embedder`, `VectorStore`: `upsert`, `search(vector, k, document_ids)`,
+`delete_documents`), реализация выбирается env.
+
+- **Эмбеддер OpenAI** — батчи по `EMBEDDING_BATCH_SIZE`, ретраи с экспоненциальным backoff и jitter на 429, таймаутах,
+  обрыве соединения и 5xx; поверх любого эмбеддера — LRU-кэш по SHA-256 от `модель:размерность:тип:текст`.
+- **pgvector** — колонка `chunks.embedding vector(1024)`, индекс HNSW `vector_cosine_ops`, оператор `<=>`,
+  score = `1 − cosine distance`. `hnsw.ef_search = 64`, при фильтре по документу — `iterative_scan`, а если индекс
+  вернул меньше k — точный проход.
+- **Qdrant** — коллекция `chunks_<эмбеддер>`, cosine, HNSW `m=16, ef_construct=64`, `hnsw_ef = 64`; в payload — текст
+  и метаданные чанка, payload-индекс по `document_id` для фильтра.
+- **Индексация** — при загрузке чанки пишутся в Postgres вместе с эмбеддингом (pgvector) и в Qdrant; транзакция
+  Postgres фиксируется только после успешного upsert в Qdrant, при ошибке — откат и 503 `indexing_failed`.
+  Точки заменённой версии документа удаляются из Qdrant.
+
+Пример: на один и тот же запрос оба хранилища вернули одинаковый top-5 с одинаковыми score.
+
+```bash
+curl -s localhost:8000/search -H 'Content-Type: application/json' \
+  -d '{"query": "задержка голосового ответа p95", "k": 5, "store": "pgvector"}'
+```
+
+### Замеры: Qdrant и pgvector
+
+```bash
+cd services/api
+PYTHONPATH=. uv run python scripts/bench_vector_stores.py   # нужен docker compose up
+```
+
+20 000 синтетических чанков (по 100 на документ), размерность 1024, эмбеддер `hashing`, 200 запросов, k = 5,
+`ef_search = 64`, оба хранилища в compose на одной машине. recall@5 — относительно точного поиска (seq scan
+в Postgres); фильтр — по одному документу.
+
+| Хранилище | Индексация 20k чанков | recall@5 | p50, мс | p95, мс | p50 с фильтром, мс | p95 с фильтром, мс |
+|-----------|-----------------------|----------|---------|---------|--------------------|--------------------|
+| pgvector | 152.5 с | 0.959 | 8.0 | 9.7 | 6.6 | 9.0 |
+| Qdrant | 20.1 с upsert + 13.6 с оптимизация | 0.898 | 6.6 | 8.2 | 6.2 | 8.3 |
+
+Совпадение top-5 между хранилищами — 0.909.
+
+- Индексация pgvector медленнее: вставка идёт в уже существующий HNSW-индекс, граф строится по одной точке на каждый
+  INSERT. Qdrant принимает точки сразу и строит граф фоном (до статуса `green`).
+- Задержка поиска сопоставима, обе укладываются в бюджет NFR на поиск с запасом.
+- recall@5 здесь — точность приближённого поиска, а не качество ответа: векторы `hashing` на синтетическом тексте
+  плохо кластеризуются, это худший случай для HNSW. Качество поиска на реальном корпусе — в «Оценка качества».
 
 ## Разработка
 

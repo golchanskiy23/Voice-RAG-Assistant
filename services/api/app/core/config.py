@@ -13,7 +13,12 @@ class DatabaseSettings(BaseSettings):
 
 class Settings(DatabaseSettings):
     llm_provider: Literal["stub"] = "stub"
-    embedder: Literal["hashing"] = "hashing"
+    embedder: Literal["hashing", "openai"] = "hashing"
+    openai_api_key: SecretStr | None = None
+    openai_embedding_model: str = "text-embedding-3-small"
+    embedding_batch_size: int = Field(default=128, gt=0, le=2048)
+    embedding_cache_size: int = Field(default=10_000, ge=0)
+    vector_store: Literal["pgvector", "qdrant"] = "qdrant"
     qdrant_url: AnyHttpUrl
     admin_api_key: SecretStr
     chunk_size: int = Field(default=300, gt=0)
@@ -23,6 +28,12 @@ class Settings(DatabaseSettings):
     def overlap_smaller_than_chunk(self) -> Self:
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap должен быть меньше chunk_size")
+        return self
+
+    @model_validator(mode="after")
+    def openai_requires_key(self) -> Self:
+        if self.embedder == "openai" and self.openai_api_key is None:
+            raise ValueError("для EMBEDDER=openai нужен OPENAI_API_KEY")
         return self
 
 

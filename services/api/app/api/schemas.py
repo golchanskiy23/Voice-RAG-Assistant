@@ -3,6 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.adapters.vector_stores.base import StoreName
 from app.services.rag import Latency
 
 
@@ -20,6 +21,32 @@ class DocumentUploadResponse(BaseModel):
     chunks: int
     pages: int | None
     status: Literal["created", "replaced", "exists"]
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=2000)
+    k: int = Field(default=5, ge=1, le=50)
+    doc_ids: list[uuid.UUID] | None = None
+    mode: Literal["vector"] = "vector"
+    store: StoreName | None = None
+
+
+class SearchChunkOut(BaseModel):
+    id: uuid.UUID
+    document_id: uuid.UUID
+    filename: str
+    ord: int
+    text: str
+    page: int | None
+    section: str | None
+    score: float
+    source: Literal["vector"]
+
+
+class SearchResponse(BaseModel):
+    chunks: list[SearchChunkOut]
+    store: StoreName
+    latency: dict[str, float]
 
 
 class AskRequest(BaseModel):
