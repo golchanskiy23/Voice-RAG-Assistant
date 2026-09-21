@@ -3,7 +3,7 @@ import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
@@ -31,8 +31,8 @@ def client(repository: InMemoryDocumentRepository) -> Iterator[TestClient]:
 
 def upload(
     client: TestClient, filename: str, content: bytes, headers: dict[str, str] = AUTH
-) -> httpx.Response:
-    response: httpx.Response = client.post(
+) -> httpx2.Response:
+    response: httpx2.Response = client.post(
         "/documents", files={"file": (filename, content)}, headers=headers
     )
     return response
@@ -52,9 +52,9 @@ def test_upload_pdf_creates_document(
     assert str(stored.id) == body["id"]
     assert (stored.filename, stored.mime) == ("report.pdf", "application/pdf")
     assert body["chunks"] == len(chunks) > 0
-    assert all(len(c.embedding) == EMBEDDING_DIM for c in chunks)
-    assert all(c.section and c.page in (1, 2) for c in chunks)
-    assert [c.ord for c in chunks] == list(range(len(chunks)))
+    assert all(len(c.chunk.embedding) == EMBEDDING_DIM for c in chunks)
+    assert all(c.chunk.section and c.chunk.page in (1, 2) for c in chunks)
+    assert [c.chunk.ord for c in chunks] == list(range(len(chunks)))
 
 
 @pytest.mark.parametrize("filename", ["notes.md", "NOTES.MARKDOWN"])

@@ -1,15 +1,14 @@
 import asyncio
 import hashlib
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2
 import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -32,16 +31,8 @@ MARKDOWN = (
 
 
 @pytest.fixture(autouse=True)
-def clean_documents(migrated_database_url: str) -> Iterator[None]:
-    yield
-
-    async def clean() -> None:
-        engine = create_async_engine(migrated_database_url)
-        async with engine.begin() as connection:
-            await connection.execute(delete(Document))
-        await engine.dispose()
-
-    asyncio.run(clean())
+def clean(clean_stores: None) -> None:
+    return None
 
 
 def query(url: str, statement: Any) -> list[Any]:
@@ -55,8 +46,8 @@ def query(url: str, statement: Any) -> list[Any]:
     return asyncio.run(run())
 
 
-def upload(client: TestClient, filename: str, content: bytes) -> httpx.Response:
-    response: httpx.Response = client.post(
+def upload(client: TestClient, filename: str, content: bytes) -> httpx2.Response:
+    response: httpx2.Response = client.post(
         "/documents",
         files={"file": (filename, content)},
         headers={API_KEY_HEADER: TEST_ADMIN_API_KEY},
@@ -186,8 +177,11 @@ def test_concurrent_saves_of_same_file_create_one_document(migrated_database_url
         async def attempt() -> str:
             session: AsyncSession
             async with sessions() as session:
-                _, status = await SqlDocumentRepository(session).save(document, [chunk])
-                return status
+                repository = SqlDocumentRepository(session)
+                saved = await repository.save(document, [chunk])
+                if saved.status != "exists":
+                    await repository.commit()
+                return saved.status
 
         statuses = await asyncio.gather(*(attempt() for _ in range(10)))
         await engine.dispose()

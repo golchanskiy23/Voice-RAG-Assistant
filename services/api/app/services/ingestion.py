@@ -1,10 +1,12 @@
 import asyncio
+import contextlib
 import hashlib
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Literal
 
 from app.adapters.embedders.base import Embedder
+from app.adapters.vector_stores.base import VectorPoint, VectorStore
 from app.core.errors import AppError
 from app.parsing.markdown import parse_markdown
 from app.parsing.models import DocumentParseError, ParsedDocument
@@ -13,6 +15,7 @@ from app.repositories.documents import (
     DocumentRepository,
     NewChunk,
     NewDocument,
+    SaveResult,
     SaveStatus,
     StoredDocument,
 )
@@ -57,11 +60,34 @@ def parse(mime: Mime, content: bytes) -> ParsedDocument:
     return parse_pdf(content) if mime == "application/pdf" else parse_markdown(content)
 
 
+def to_points(saved: SaveResult) -> list[VectorPoint]:
+    return [
+        VectorPoint(
+            chunk_id=item.id,
+            document_id=saved.document.id,
+            filename=saved.document.filename,
+            ord=item.chunk.ord,
+            text=item.chunk.text,
+            page=item.chunk.page,
+            section=item.chunk.section,
+            vector=item.chunk.embedding,
+        )
+        for item in saved.chunks
+    ]
+
+
 class IngestionService:
-    def __init__(self, documents: DocumentRepository, embedder: Embedder, chunker: Chunker) -> None:
+    def __init__(
+        self,
+        documents: DocumentRepository,
+        embedder: Embedder,
+        chunker: Chunker,
+        index: VectorStore,
+    ) -> None:
         self._documents = documents
         self._embedder = embedder
         self._chunker = chunker
+        self._index = index
 
     async def upload(self, filename: str, content: bytes) -> UploadResult:
         if not content:
@@ -93,5 +119,19 @@ class IngestionService:
         document = NewDocument(
             filename=PurePath(filename).name, sha256=sha256, mime=mime, pages=parsed.pages
         )
-        stored, status = await self._documents.save(document, chunks)
-        return UploadResult(stored, status)
+        saved = await self._documents.save(document, chunks)
+        if saved.status == "exists":
+            return UploadResult(saved.document, "exists")
+        try:
+            await self._index.upsert(to_points(saved))
+            await self._documents.commit()
+        except Exception as exc:
+            await self._documents.rollback()
+            with contextlib.suppress(Exception):
+                await self._index.delete_documents([saved.document.id])
+            raise AppError(
+                "indexing_failed", "Не удалось проиндексировать документ", status_code=503
+            ) from exc
+        with contextlib.suppress(Exception):
+            await self._index.delete_documents(saved.replaced)
+        return UploadResult(saved.document, saved.status)

@@ -16,7 +16,8 @@ from app.repositories.documents import (
     DocumentRepository,
     NewChunk,
     NewDocument,
-    SaveStatus,
+    SavedChunk,
+    SaveResult,
     StoredDocument,
 )
 
@@ -49,7 +50,7 @@ class FakeDatabase(Database):
 
 class FakeQdrant(Qdrant):
     def __init__(self, ready: bool = True) -> None:
-        super().__init__(TEST_QDRANT_URL, check_compatibility=False)
+        super().__init__(location=":memory:")
         self.ready = ready
         self.closed = False
 
@@ -64,20 +65,18 @@ class FakeQdrant(Qdrant):
 class InMemoryDocumentRepository:
     def __init__(self) -> None:
         self.documents: dict[str, StoredDocument] = {}
-        self.chunks: dict[uuid.UUID, list[NewChunk]] = {}
+        self.chunks: dict[uuid.UUID, list[SavedChunk]] = {}
+        self._pending: tuple[StoredDocument, list[SavedChunk], list[StoredDocument]] | None = None
+        self.commits = 0
+        self.rollbacks = 0
 
     async def find_by_sha256(self, sha256: str) -> StoredDocument | None:
         return self.documents.get(sha256)
 
-    async def save(
-        self, document: NewDocument, chunks: Sequence[NewChunk]
-    ) -> tuple[StoredDocument, SaveStatus]:
+    async def save(self, document: NewDocument, chunks: Sequence[NewChunk]) -> SaveResult:
         if document.sha256 in self.documents:
-            return self.documents[document.sha256], "exists"
+            return SaveResult(self.documents[document.sha256], "exists", [], [])
         old = [d for d in self.documents.values() if d.filename == document.filename]
-        for stale in old:
-            del self.documents[stale.sha256]
-            self.chunks.pop(stale.id, None)
         stored = StoredDocument(
             id=uuid.uuid4(),
             filename=document.filename,
@@ -86,9 +85,24 @@ class InMemoryDocumentRepository:
             pages=document.pages,
             chunks=len(chunks),
         )
-        self.documents[document.sha256] = stored
-        self.chunks[stored.id] = list(chunks)
-        return stored, "replaced" if old else "created"
+        saved = [SavedChunk(id=uuid.uuid4(), chunk=chunk) for chunk in chunks]
+        self._pending = (stored, saved, old)
+        return SaveResult(stored, "replaced" if old else "created", saved, [d.id for d in old])
+
+    async def commit(self) -> None:
+        if self._pending is not None:
+            stored, saved, old = self._pending
+            for stale in old:
+                del self.documents[stale.sha256]
+                self.chunks.pop(stale.id, None)
+            self.documents[stored.sha256] = stored
+            self.chunks[stored.id] = saved
+            self._pending = None
+        self.commits += 1
+
+    async def rollback(self) -> None:
+        self._pending = None
+        self.rollbacks += 1
 
 
 def build_app(
