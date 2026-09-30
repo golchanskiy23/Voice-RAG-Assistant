@@ -1,4 +1,4 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import Annotated
 
 from fastapi import Depends, Request
@@ -13,7 +13,8 @@ from app.core.database import Database
 from app.repositories.documents import DocumentRepository, SqlDocumentRepository
 from app.services.chunking import Chunker
 from app.services.ingestion import IngestionService
-from app.services.rag import RAGService
+from app.services.prompts import AnswerPrompt
+from app.services.rag import RAGService, RAGSettings
 from app.services.search import SearchService
 
 
@@ -59,10 +60,6 @@ def get_document_repository(
     return SqlDocumentRepository(session)
 
 
-def get_rag_service(llm: Annotated[LLMClient, Depends(get_llm)]) -> RAGService:
-    return RAGService(llm)
-
-
 def get_chunker(
     settings: Annotated[Settings, Depends(get_settings_dep)],
     embedder: Annotated[Embedder, Depends(get_embedder)],
@@ -85,6 +82,38 @@ def get_search_service(
     stores: Annotated[dict[StoreName, VectorStore], Depends(get_vector_stores)],
 ) -> SearchService:
     return SearchService(embedder, stores, settings.vector_store)
+
+
+def get_prompt(request: Request) -> AnswerPrompt:
+    prompt: AnswerPrompt = request.app.state.prompt
+    return prompt
+
+
+def get_token_counter(request: Request) -> Callable[[str], int]:
+    count_tokens: Callable[[str], int] = request.app.state.count_tokens
+    return count_tokens
+
+
+def get_rag_service(
+    settings: Annotated[Settings, Depends(get_settings_dep)],
+    search: Annotated[SearchService, Depends(get_search_service)],
+    llm: Annotated[LLMClient, Depends(get_llm)],
+    prompt: Annotated[AnswerPrompt, Depends(get_prompt)],
+    count_tokens: Annotated[Callable[[str], int], Depends(get_token_counter)],
+) -> RAGService:
+    return RAGService(
+        search,
+        llm,
+        prompt,
+        count_tokens,
+        RAGSettings(
+            top_k=settings.rag_top_k,
+            min_score=settings.rag_min_score,
+            context_tokens=settings.rag_context_tokens,
+            max_tokens=settings.llm_max_tokens,
+            temperature=settings.llm_temperature,
+        ),
+    )
 
 
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]

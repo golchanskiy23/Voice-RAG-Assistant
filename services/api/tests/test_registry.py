@@ -1,6 +1,10 @@
-import pytest
+import asyncio
 
-from app.adapters.llm.registry import llm_registry
+import pytest
+from pydantic import SecretStr
+
+from app.adapters.llm.fallback import FallbackLLMClient
+from app.adapters.llm.registry import build_llm, llm_registry
 from app.adapters.llm.stub import StubLLMClient
 from app.adapters.registry import Registry, UnknownAdapterError
 from tests.factories import make_settings
@@ -23,7 +27,10 @@ def test_each_create_returns_new_instance() -> None:
 
 
 def test_unknown_name_lists_available() -> None:
-    with pytest.raises(UnknownAdapterError, match=r"llm: неизвестная реализация 'gpt'.*\['stub'\]"):
+    with pytest.raises(
+        UnknownAdapterError,
+        match=r"llm: неизвестная реализация 'gpt'.*\['gigachat', 'openai', 'stub'\]",
+    ):
         llm_registry.create("gpt", make_settings())
 
 
@@ -33,3 +40,15 @@ def test_duplicate_registration_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="уже зарегистрирована"):
         registry.register("stub", lambda _: StubLLMClient())
+
+
+def test_fallback_wraps_two_providers() -> None:
+    settings = make_settings().model_copy(
+        update={"llm_fallback": "openai", "openai_api_key": SecretStr("test")}
+    )
+
+    client = build_llm(settings)
+
+    assert isinstance(client, FallbackLLMClient)
+    assert client.name == "stub>openai"
+    asyncio.run(client.close())

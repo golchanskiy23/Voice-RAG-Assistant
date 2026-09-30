@@ -122,3 +122,28 @@ def test_database_settings_do_not_require_qdrant(monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("QDRANT_URL")
 
     assert str(DatabaseSettings().database_url) == TEST_DATABASE_URL
+
+
+@pytest.mark.parametrize(
+    ("env", "fragment"),
+    [
+        ({"LLM_PROVIDER": "openai"}, "OPENAI_API_KEY"),
+        ({"LLM_FALLBACK": "gigachat"}, "GIGACHAT_CREDENTIALS"),
+        ({"LLM_PROVIDER": "stub", "LLM_FALLBACK": "stub"}, "LLM_FALLBACK"),
+    ],
+)
+def test_llm_provider_requirements(
+    monkeypatch: pytest.MonkeyPatch, env: dict[str, str], fragment: str
+) -> None:
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
+    with pytest.raises(ValidationError, match=fragment):
+        Settings()
+
+
+def test_gigachat_with_credentials_is_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "gigachat")
+    monkeypatch.setenv("GIGACHAT_CREDENTIALS", "secret")
+
+    assert Settings().llm_providers == {"gigachat"}

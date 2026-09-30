@@ -7,7 +7,8 @@ RAG реализован вручную, без LangChain, LlamaIndex и под�
 ответа измеряются воспроизводимым eval.
 
 > **Статус:** в разработке — готовы каркас сервиса, инфраструктура, загрузка и индексация документов, векторный поиск
-> top-k в Qdrant и pgvector за общим интерфейсом; гибридный поиск, LLM и голос впереди.
+> top-k в Qdrant и pgvector за общим интерфейсом, ответ LLM (OpenAI / GigaChat с fallback) со ссылкой на источник
+> и SSE-стримингом; гибридный поиск и голос впереди.
 > Полное техническое задание — [`docs/spec.md`](docs/spec.md).
 
 ## Возможности
@@ -113,8 +114,8 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | GET | `/health` | Процесс жив | ✅ |
 | GET | `/ready` | Postgres, Qdrant, эмбеддер и LLM доступны, иначе 503 | ✅ |
 | POST | `/documents` | Загрузить PDF/Markdown до 20 МБ (API-ключ в `X-API-Key`): парсинг, чанкинг, эмбеддинги, запись чанков в Postgres (+ pgvector) и Qdrant; тот же файл → тот же `id`, новая версия с тем же именем заменяет старую | ✅ |
-| POST | `/ask` | Ответ целиком: `{answer, sources, confidence, latency}` | ✅ заглушка LLM |
-| POST | `/ask/stream` | SSE: `token`, `sources`, `done`, `error` | ✅ заглушка LLM |
+| POST | `/ask` | Ответ целиком: `{answer, sources: [{filename, page, section, quote}], confidence, latency}` | ✅ |
+| POST | `/ask/stream` | SSE: `token` (текст ответа), `sources` (источники и confidence), `done` (latency), `error` | ✅ |
 | GET | `/documents` | Список документов | план |
 | DELETE | `/documents/{id}` | Удалить документ и его чанки | план |
 | POST | `/search` | Поиск top-k чанков: `{query, k, doc_ids?, mode, store?}` → `{chunks: [{id, document_id, filename, ord, text, page, section, score, source}], store, latency}` | ✅ `mode=vector` |
@@ -131,9 +132,20 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | Переменная | По умолчанию в compose | Назначение |
 |------------|------------------------|------------|
 | `ADMIN_API_KEY` | `dev-admin-key` | Ключ для `/documents` |
-| `LLM_PROVIDER` | `stub` | Реализация LLM (пока только заглушка) |
+| `LLM_PROVIDER` | `stub` | LLM: `openai`, `gigachat` или `stub` — без сети, цитирует первый найденный чанк (для разработки) |
+| `LLM_FALLBACK` | — | Второй провайдер: при ошибке первого (после ретраев) запрос уходит ему |
+| `OPENAI_LLM_MODEL` | `gpt-4o-mini` | Модель OpenAI для ответа (нужна поддержка strict JSON Schema) |
+| `GIGACHAT_CREDENTIALS` | — | Authorization key GigaChat (base64 `client_id:client_secret`), обязателен для `gigachat` |
+| `GIGACHAT_SCOPE`, `GIGACHAT_MODEL` | `GIGACHAT_API_PERS`, `GigaChat-2` | Scope OAuth и модель GigaChat |
+| `GIGACHAT_VERIFY_SSL`, `GIGACHAT_CA_BUNDLE_FILE` | `true`, — | Проверка TLS; API подписан НУЦ Минцифры — нужен его корневой сертификат |
+| `LLM_TIMEOUT`, `LLM_MAX_TOKENS` | `30`, `512` | Таймаут запроса к LLM, с; потолок токенов ответа |
+| `PROMPT_VERSION` | `v1` | Версия промпта из `services/api/prompts/answer/<версия>/` |
+| `RAG_TOP_K` | `5` | Сколько чанков искать для ответа |
+| `RAG_MIN_SCORE` | `0.0` | Порог score: если ни один чанк не прошёл — отказ без вызова LLM |
+| `RAG_CONTEXT_TOKENS` | `3000` | Бюджет токенов на чанки в промпте; не поместившиеся отбрасываются с конца |
+| `LOG_LEVEL` | `INFO` | Уровень логов; текст вопроса пишется только на `DEBUG` |
 | `EMBEDDER` | `hashing` | Эмбеддер: `hashing` — feature hashing без модели, для разработки; `openai` — OpenAI embeddings |
-| `OPENAI_API_KEY` | — | Обязателен при `EMBEDDER=openai` |
+| `OPENAI_API_KEY` | — | Обязателен при `EMBEDDER=openai` и LLM `openai` |
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Модель OpenAI; размерность приводится к 1024 параметром `dimensions` |
 | `EMBEDDING_BATCH_SIZE` | `128` | Текстов в одном запросе к эмбеддеру |
 | `EMBEDDING_CACHE_SIZE` | `10000` | LRU-кэш эмбеддингов по SHA-256 текста; `0` — выключен |
@@ -224,6 +236,34 @@ PYTHONPATH=. uv run python scripts/bench_vector_stores.py   # нужен docker 
 - Задержка поиска сопоставима, обе укладываются в бюджет NFR на поиск с запасом.
 - recall@5 здесь — точность приближённого поиска, а не качество ответа: векторы `hashing` на синтетическом тексте
   плохо кластеризуются, это худший случай для HNSW. Качество поиска на реальном корпусе — в «Оценка качества».
+
+## Генерация ответа
+
+`/ask`: поиск top-k → фильтр по `RAG_MIN_SCORE` → бюджет контекста → промпт → LLM → валидация → источники.
+
+- **Промпт** — `services/api/prompts/answer/v1/` (`system.md`, `user.md`, `retry.md`). Правила: только по контексту,
+  чанки пронумерованы `[1]…[k]` с файлом, страницей и разделом, при отсутствии ответа — фраза
+  «В документах нет ответа на этот вопрос.». Версия (`answer/v1`) пишется в лог каждого запроса.
+- **Структурированный ответ** — strict JSON Schema (`answer`, `sources`, `confidence`) у OpenAI и GigaChat, затем
+  Pydantic `LLMAnswer`: номера источников вне `1..k` — ошибка. Невалидный ответ — один повтор с текстом ошибки, затем
+  отказ. Ответ без источников тоже превращается в отказ.
+- **Источник** — файл, страница, раздел и цитата до 200 символов из процитированного чанка.
+- **Стриминг** — модель стримит JSON, сервис на лету вынимает из него значение `answer` и шлёт событиями `token`;
+  после конца стрима JSON валидируется и уходит событием `sources`.
+- **LLM за интерфейсом** — `LLMClient` (`complete`, `stream`): OpenAI (ретраи с backoff на 429/5xx/таймаутах),
+  GigaChat (OAuth-токен обновляет SDK), `FallbackLLMClient` (переключение на второго провайдера; в стриме — только
+  до первого токена).
+- **Логи** — JSON (structlog) на каждый запрос: `request_id`, `chunk_ids`, `sources`, `provider`, `prompt_version`,
+  `prompt_tokens`/`completion_tokens`, `latency_ms` по этапам (`embed`, `search`, `first_token`, `llm`, `total`).
+
+```bash
+curl -s localhost:8000/ask -H 'Content-Type: application/json' -d '{"question": "Какой максимальный размер файла?"}'
+curl -N localhost:8000/ask/stream -H 'Content-Type: application/json' -d '{"question": "Какой максимальный размер файла?"}'
+```
+
+Бюджет контекста на этом вопросе (top-5, токенизатор `o200k_base`): system 250 + вопрос 13 + чанки 1 109 + служебные 11
++ ответ до 512 = 1 895 токенов. Качество ответов с реальной LLM (верный документ на 5 вопросах, отказ вне базы) ещё
+не измерено: проверено только с `stub` и на тестах с замоканной LLM.
 
 ## Разработка
 

@@ -9,7 +9,7 @@ from app.adapters.base import Resource
 from app.adapters.embedders.base import Embedder, ensure_chunk_fits, ensure_dimension
 from app.adapters.embedders.registry import build_embedder
 from app.adapters.llm.base import LLMClient
-from app.adapters.llm.registry import llm_registry
+from app.adapters.llm.registry import build_llm
 from app.adapters.vector_stores.base import StoreName, VectorStore
 from app.adapters.vector_stores.pgvector import PgVectorStore
 from app.adapters.vector_stores.qdrant import QdrantVectorStore
@@ -17,8 +17,11 @@ from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.database import Database
 from app.core.errors import register_error_handlers
+from app.core.logging import configure_logging
 from app.core.qdrant import Qdrant
 from app.core.request_id import request_id_middleware
+from app.core.tokens import count_llm_tokens
+from app.services.prompts import load_answer_prompt
 
 STARTUP_TIMEOUT_SECONDS = 3.0
 
@@ -29,14 +32,17 @@ def create_app(
     database_factory: Callable[[Settings], Database] | None = None,
     qdrant_factory: Callable[[Settings], Qdrant] | None = None,
     embedder_factory: Callable[[], Embedder] | None = None,
+    count_tokens: Callable[[str], int] = count_llm_tokens,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolved = settings or get_settings()
+        configure_logging(resolved.log_level)
+        prompt = load_answer_prompt(resolved.prompts_dir, resolved.prompt_version)
         embedder = embedder_factory() if embedder_factory else build_embedder(resolved)
         ensure_dimension(embedder)
         ensure_chunk_fits(embedder, resolved.chunk_size)
-        llm = llm_factory() if llm_factory else llm_registry.create(resolved.llm_provider, resolved)
+        llm = llm_factory() if llm_factory else build_llm(resolved)
         database = (
             database_factory(resolved) if database_factory else Database(str(resolved.database_url))
         )
@@ -60,6 +66,8 @@ def create_app(
         app.state.resources = resources
         app.state.vector_stores = vector_stores
         app.state.index = qdrant_store
+        app.state.prompt = prompt
+        app.state.count_tokens = count_tokens
         try:
             with contextlib.suppress(Exception):
                 async with asyncio.timeout(STARTUP_TIMEOUT_SECONDS):
