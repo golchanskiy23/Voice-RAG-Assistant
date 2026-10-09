@@ -1,7 +1,8 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr, model_validator
+from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -11,8 +12,29 @@ class DatabaseSettings(BaseSettings):
     database_url: PostgresDsn
 
 
+LLMProvider = Literal["stub", "openai", "gigachat"]
+
+PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
+
+
 class Settings(DatabaseSettings):
-    llm_provider: Literal["stub"] = "stub"
+    llm_provider: LLMProvider = "stub"
+    llm_fallback: LLMProvider | None = None
+    llm_timeout: float = Field(default=30.0, gt=0)
+    llm_max_tokens: int = Field(default=512, gt=0)
+    llm_temperature: float = Field(default=0.0, ge=0, le=2)
+    openai_llm_model: str = "gpt-4o-mini"
+    gigachat_credentials: SecretStr | None = None
+    gigachat_scope: str = "GIGACHAT_API_PERS"
+    gigachat_model: str = "GigaChat-2"
+    gigachat_verify_ssl: bool = True
+    gigachat_ca_bundle_file: str | None = None
+    prompts_dir: Path = PROMPTS_DIR
+    prompt_version: str = "v1"
+    rag_top_k: int = Field(default=5, ge=1, le=50)
+    rag_min_score: float = 0.0
+    rag_context_tokens: int = Field(default=3000, gt=0)
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     embedder: Literal["hashing", "openai"] = "hashing"
     openai_api_key: SecretStr | None = None
     openai_embedding_model: str = "text-embedding-3-small"
@@ -24,6 +46,13 @@ class Settings(DatabaseSettings):
     chunk_size: int = Field(default=300, gt=0)
     chunk_overlap: int = Field(default=45, ge=0)
 
+    @field_validator(
+        "llm_fallback", "gigachat_credentials", "gigachat_ca_bundle_file", mode="before"
+    )
+    @classmethod
+    def empty_as_none(cls, value: object) -> object:
+        return None if value == "" else value
+
     @model_validator(mode="after")
     def overlap_smaller_than_chunk(self) -> Self:
         if self.chunk_overlap >= self.chunk_size:
@@ -32,9 +61,26 @@ class Settings(DatabaseSettings):
 
     @model_validator(mode="after")
     def openai_requires_key(self) -> Self:
-        if self.embedder == "openai" and self.openai_api_key is None:
-            raise ValueError("для EMBEDDER=openai нужен OPENAI_API_KEY")
+        uses_openai = self.embedder == "openai" or "openai" in self.llm_providers
+        if uses_openai and self.openai_api_key is None:
+            raise ValueError("для EMBEDDER=openai и LLM openai нужен OPENAI_API_KEY")
         return self
+
+    @model_validator(mode="after")
+    def gigachat_requires_credentials(self) -> Self:
+        if "gigachat" in self.llm_providers and self.gigachat_credentials is None:
+            raise ValueError("для LLM gigachat нужен GIGACHAT_CREDENTIALS")
+        return self
+
+    @model_validator(mode="after")
+    def fallback_differs_from_provider(self) -> Self:
+        if self.llm_fallback == self.llm_provider:
+            raise ValueError("LLM_FALLBACK должен отличаться от LLM_PROVIDER")
+        return self
+
+    @property
+    def llm_providers(self) -> set[LLMProvider]:
+        return {self.llm_provider} | ({self.llm_fallback} if self.llm_fallback else set())
 
 
 @lru_cache

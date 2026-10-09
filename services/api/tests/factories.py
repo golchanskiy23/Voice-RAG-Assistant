@@ -26,6 +26,10 @@ TEST_QDRANT_URL = "http://localhost:1"
 TEST_ADMIN_API_KEY = "test-admin-key"
 
 
+def count_words(text: str) -> int:
+    return len(text.split())
+
+
 def make_settings() -> Settings:
     return Settings(
         database_url=TEST_DATABASE_URL,
@@ -112,6 +116,7 @@ def build_app(
     settings: Settings | None = None,
     documents: DocumentRepository | None = None,
     embedder_factory: Callable[[], Embedder] = HashingEmbedder,
+    count_tokens: Callable[[str], int] = count_words,
 ) -> FastAPI:
     fake_database = database or FakeDatabase()
     fake_qdrant = qdrant or FakeQdrant()
@@ -122,6 +127,7 @@ def build_app(
         database_factory=lambda _: fake_database,
         qdrant_factory=lambda _: fake_qdrant,
         embedder_factory=embedder_factory,
+        count_tokens=count_tokens,
     )
     app.dependency_overrides[get_document_repository] = lambda: repository
     return app

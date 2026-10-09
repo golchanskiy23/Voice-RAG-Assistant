@@ -24,11 +24,16 @@ WORKDIR /app
 COPY --from=builder --chown=app:app /app/.venv /app/.venv
 COPY --chown=app:app alembic.ini ./
 COPY --chown=app:app migrations ./migrations
+COPY --chown=app:app prompts ./prompts
 COPY --chown=app:app app ./app
 
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    TIKTOKEN_CACHE_DIR=/app/.tiktoken
+
+RUN python -c "import tiktoken; [tiktoken.get_encoding(n) for n in ('cl100k_base', 'o200k_base')]" \
+    && chown -R app:app /app/.tiktoken
 
 USER app
 

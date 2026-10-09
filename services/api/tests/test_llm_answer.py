@@ -1,6 +1,14 @@
+import json
+
 import pytest
 
-from app.services.llm_answer import AnswerValidationError, parse_llm_answer
+from app.services.llm_answer import (
+    ANSWER_SCHEMA,
+    AnswerFieldStream,
+    AnswerValidationError,
+    LLMAnswer,
+    parse_llm_answer,
+)
 
 
 def test_parses_valid_answer() -> None:
@@ -36,3 +44,33 @@ def test_rejects_invalid_answer(raw: str, fragment: str) -> None:
         parse_llm_answer(raw, chunk_count=3)
 
     assert fragment in exc_info.value.details
+
+
+ANSWER_JSON = json.dumps(
+    {"answer": 'Цитата "в кавычках"\nи перенос \\ слэш 🙂', "sources": [1], "confidence": 0.5},
+    ensure_ascii=True,
+)
+
+
+@pytest.mark.parametrize("step", [1, 2, 3, 7, len(ANSWER_JSON)])
+def test_answer_field_stream_decodes_any_split(step: int) -> None:
+    stream = AnswerFieldStream()
+
+    decoded = "".join(
+        stream.feed(ANSWER_JSON[i : i + step]) for i in range(0, len(ANSWER_JSON), step)
+    )
+
+    assert decoded == json.loads(ANSWER_JSON)["answer"]
+    assert stream.raw == ANSWER_JSON
+
+
+def test_answer_field_stream_ignores_text_after_answer() -> None:
+    stream = AnswerFieldStream()
+
+    assert stream.feed('{"answer": "да", "sources": [1]') == "да"
+    assert stream.feed(', "confidence": 1}') == ""
+
+
+def test_answer_schema_matches_pydantic_model() -> None:
+    assert set(ANSWER_SCHEMA.schema["properties"]) == set(LLMAnswer.model_fields)
+    assert ANSWER_SCHEMA.schema["additionalProperties"] is False
