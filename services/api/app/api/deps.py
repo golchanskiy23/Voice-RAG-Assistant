@@ -7,15 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.adapters.base import Resource
 from app.adapters.embedders.base import Embedder
 from app.adapters.llm.base import LLMClient
+from app.adapters.rerankers.base import Reranker
 from app.adapters.vector_stores.base import StoreName, VectorStore
 from app.core.config import Settings
 from app.core.database import Database
 from app.repositories.documents import DocumentRepository, SqlDocumentRepository
+from app.repositories.fulltext import KeywordIndex
 from app.services.chunking import Chunker
 from app.services.ingestion import IngestionService
 from app.services.prompts import AnswerPrompt
 from app.services.rag import RAGService, RAGSettings
-from app.services.search import SearchService
+from app.services.search import SearchDefaults, SearchService
 
 
 def get_settings_dep(request: Request) -> Settings:
@@ -76,12 +78,30 @@ def get_ingestion_service(
     return IngestionService(documents, embedder, chunker, index)
 
 
+def get_keyword_index(request: Request) -> KeywordIndex:
+    keyword: KeywordIndex = request.app.state.keyword
+    return keyword
+
+
+def get_reranker(request: Request) -> Reranker | None:
+    reranker: Reranker | None = request.app.state.reranker
+    return reranker
+
+
 def get_search_service(
     settings: Annotated[Settings, Depends(get_settings_dep)],
     embedder: Annotated[Embedder, Depends(get_embedder)],
     stores: Annotated[dict[StoreName, VectorStore], Depends(get_vector_stores)],
+    keyword: Annotated[KeywordIndex, Depends(get_keyword_index)],
+    reranker: Annotated[Reranker | None, Depends(get_reranker)],
 ) -> SearchService:
-    return SearchService(embedder, stores, settings.vector_store)
+    defaults = SearchDefaults(
+        store=settings.vector_store,
+        mode=settings.search_mode,
+        rerank_candidates=settings.rerank_candidates,
+        rrf_k=settings.rrf_k,
+    )
+    return SearchService(embedder, stores, defaults, keyword, reranker)
 
 
 def get_prompt(request: Request) -> AnswerPrompt:

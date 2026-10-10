@@ -4,9 +4,10 @@ from collections.abc import Callable, Sequence
 from fastapi import FastAPI
 
 from app.adapters.embedders.base import Embedder
-from app.adapters.embedders.hashing import HashingEmbedder
+from app.adapters.embedders.hashing import HashingEmbedder, words
 from app.adapters.llm.base import LLMClient
 from app.adapters.llm.stub import StubLLMClient
+from app.adapters.vector_stores.base import SearchHit
 from app.api.deps import get_document_repository
 from app.core.config import Settings
 from app.core.database import Database
@@ -109,6 +110,37 @@ class InMemoryDocumentRepository:
         self.rollbacks += 1
 
 
+class InMemoryKeywordIndex:
+    def __init__(self, repository: InMemoryDocumentRepository) -> None:
+        self._repository = repository
+
+    async def search(
+        self, query: str, k: int, document_ids: Sequence[uuid.UUID] | None = None
+    ) -> list[SearchHit]:
+        terms = set(words(query))
+        hits = []
+        for document in self._repository.documents.values():
+            if document_ids and document.id not in document_ids:
+                continue
+            for saved in self._repository.chunks.get(document.id, []):
+                overlap = len(terms & set(words(saved.chunk.text)))
+                if overlap:
+                    hits.append(
+                        SearchHit(
+                            chunk_id=saved.id,
+                            document_id=document.id,
+                            filename=document.filename,
+                            ord=saved.chunk.ord,
+                            text=saved.chunk.text,
+                            page=saved.chunk.page,
+                            section=saved.chunk.section,
+                            score=float(overlap),
+                            found_by=("bm25",),
+                        )
+                    )
+        return sorted(hits, key=lambda hit: hit.score, reverse=True)[:k]
+
+
 def build_app(
     llm_factory: Callable[[], LLMClient] = StubLLMClient,
     database: FakeDatabase | None = None,
@@ -121,6 +153,11 @@ def build_app(
     fake_database = database or FakeDatabase()
     fake_qdrant = qdrant or FakeQdrant()
     repository = documents or InMemoryDocumentRepository()
+    keyword = InMemoryKeywordIndex(
+        repository
+        if isinstance(repository, InMemoryDocumentRepository)
+        else InMemoryDocumentRepository()
+    )
     app = create_app(
         settings=settings or make_settings(),
         llm_factory=llm_factory,
@@ -128,6 +165,7 @@ def build_app(
         qdrant_factory=lambda _: fake_qdrant,
         embedder_factory=embedder_factory,
         count_tokens=count_tokens,
+        keyword_factory=lambda _: keyword,
     )
     app.dependency_overrides[get_document_repository] = lambda: repository
     return app

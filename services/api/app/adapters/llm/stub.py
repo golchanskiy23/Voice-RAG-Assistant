@@ -6,7 +6,11 @@ from collections.abc import AsyncIterator
 from app.adapters.llm.base import Completion, LLMChunk, LLMRequest, StreamEnd, TextDelta
 from app.services.llm_answer import NO_ANSWER
 
-FIRST_CHUNK = re.compile(r"^\[1\] \(.*?\)\n(?P<text>.+?)(?:\n\n\[2\] |\n\nВопрос:)", re.S | re.M)
+FIRST_CHUNK = re.compile(
+    r'<фрагмент номер="1"[^>]*>\n(?P<xml>.*?)\n</фрагмент>'
+    r"|^\[1\] \(.*?\)\n(?P<plain>.+?)(?:\n\n\[2\] |\n\nВопрос:)",
+    re.S | re.M,
+)
 SENTENCE = re.compile(r".+?[.!?](?=\s|$)", re.S)
 
 
@@ -16,7 +20,7 @@ def extractive_answer(request: LLMRequest) -> str:
     if match is None:
         answer = {"answer": NO_ANSWER, "sources": [], "confidence": 0.0}
     else:
-        text = " ".join(match["text"].split())
+        text = " ".join((match["xml"] or match["plain"]).split())
         sentence = SENTENCE.match(text)
         answer = {
             "answer": (sentence[0] if sentence else text)[:300],

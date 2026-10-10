@@ -23,7 +23,9 @@ def parse_sse(body: str) -> list[tuple[str, dict[str, Any]]]:
 
 def test_stream_emits_tokens_then_sources_then_done(client: TestClient) -> None:
     upload(client, "faq.md", FAQ)
-    with client.stream("POST", "/ask/stream", json={"question": "лимиты файлов"}) as response:
+    with client.stream(
+        "POST", "/ask/stream", json={"question": "какие файлы отклоняются"}
+    ) as response:
         body = response.read().decode()
 
     assert response.status_code == 200
@@ -60,7 +62,10 @@ def test_stream_reports_error_event_mid_stream() -> None:
     with TestClient(build_app(llm_factory=FailingLLM)) as client:
         upload(client, "faq.md", FAQ)
         with client.stream(
-            "POST", "/ask/stream", json={"question": "q"}, headers={"X-Request-ID": "req-9"}
+            "POST",
+            "/ask/stream",
+            json={"question": "файлы больше"},
+            headers={"X-Request-ID": "req-9"},
         ) as response:
             events = parse_sse(response.read().decode())
 

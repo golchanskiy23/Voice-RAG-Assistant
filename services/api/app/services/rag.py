@@ -1,7 +1,7 @@
 import time
 from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TypedDict
+from typing import TypedDict, cast
 
 import structlog
 
@@ -14,7 +14,7 @@ from app.adapters.llm.base import (
     Usage,
 )
 from app.adapters.vector_stores.base import SearchHit
-from app.services.context import fit_to_budget, format_context, make_quote
+from app.services.context import fit_to_budget, make_quote
 from app.services.llm_answer import (
     ANSWER_SCHEMA,
     NO_ANSWER,
@@ -32,6 +32,8 @@ log = structlog.get_logger()
 class Latency(TypedDict, total=False):
     embed: float
     search: float
+    bm25: float
+    rerank: float
     first_token: float
     llm: float
     total: float
@@ -187,15 +189,12 @@ class RAGService:
         found = await self._search.search(question, self._settings.top_k)
         relevant = [hit for hit in found.hits if hit.score >= self._settings.min_score]
         budget = self._settings.context_tokens
-        hits = fit_to_budget(relevant, budget, self._count_tokens)
-        latency: Latency = {
-            "embed": found.latency_ms["embed"],
-            "search": found.latency_ms["search"],
-        }
+        hits = fit_to_budget(relevant, budget, self._count_tokens, self._prompt.render_chunk)
+        latency = cast(Latency, dict(found.latency_ms))
         return Retrieval(hits=hits, latency_ms=latency)
 
     def _messages(self, question: str, hits: Sequence[SearchHit]) -> tuple[ChatMessage, ...]:
-        return self._prompt.messages(question=question, context=format_context(hits))
+        return self._prompt.messages(question, hits)
 
     def _request(self, messages: tuple[ChatMessage, ...]) -> LLMRequest:
         return LLMRequest(
