@@ -7,8 +7,8 @@ RAG реализован вручную, без LangChain, LlamaIndex и под�
 ответа измеряются воспроизводимым eval.
 
 > **Статус:** в разработке — готовы каркас сервиса, инфраструктура, загрузка и индексация документов, векторный поиск
-> top-k в Qdrant и pgvector за общим интерфейсом, ответ LLM (OpenAI / GigaChat с fallback) со ссылкой на источник
-> и SSE-стримингом; гибридный поиск и голос впереди.
+> top-k в Qdrant и pgvector, BM25 и гибрид через RRF, eval поиска (baseline), ответ LLM (OpenAI / GigaChat
+> с fallback) со ссылкой на источник и SSE-стримингом; замеры reranker'а и локальных эмбеддеров и голос впереди.
 > Полное техническое задание — [`docs/spec.md`](docs/spec.md).
 
 ## Возможности
@@ -118,7 +118,7 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | POST | `/ask/stream` | SSE: `token` (текст ответа), `sources` (источники и confidence), `done` (latency), `error` | ✅ |
 | GET | `/documents` | Список документов | план |
 | DELETE | `/documents/{id}` | Удалить документ и его чанки | план |
-| POST | `/search` | Поиск top-k чанков: `{query, k, doc_ids?, mode, store?}` → `{chunks: [{id, document_id, filename, ord, text, page, section, score, source}], store, latency}` | ✅ `mode=vector` |
+| POST | `/search` | Поиск top-k чанков: `{query, k, doc_ids?, mode?: vector\|bm25\|hybrid, store?, rerank?}` → `{chunks: [{id, document_id, filename, ord, text, page, section, score, source, found_by}], store, mode, reranked, latency}` | ✅ |
 | WS | `/ws/voice` | Аудио → `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `done` | план |
 | POST | `/telegram/webhook` | Обновления Telegram | план |
 
@@ -139,16 +139,20 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | `GIGACHAT_SCOPE`, `GIGACHAT_MODEL` | `GIGACHAT_API_PERS`, `GigaChat-2` | Scope OAuth и модель GigaChat |
 | `GIGACHAT_VERIFY_SSL`, `GIGACHAT_CA_BUNDLE_FILE` | `true`, — | Проверка TLS; API подписан НУЦ Минцифры — нужен его корневой сертификат |
 | `LLM_TIMEOUT`, `LLM_MAX_TOKENS` | `30`, `512` | Таймаут запроса к LLM, с; потолок токенов ответа |
-| `PROMPT_VERSION` | `v1` | Версия промпта из `services/api/prompts/answer/<версия>/` |
+| `PROMPT_VERSION` | `v2` | Версия промпта из `services/api/prompts/answer/<версия>/` |
 | `RAG_TOP_K` | `5` | Сколько чанков искать для ответа |
 | `RAG_MIN_SCORE` | `0.0` | Порог score: если ни один чанк не прошёл — отказ без вызова LLM |
 | `RAG_CONTEXT_TOKENS` | `3000` | Бюджет токенов на чанки в промпте; не поместившиеся отбрасываются с конца |
 | `LOG_LEVEL` | `INFO` | Уровень логов; текст вопроса пишется только на `DEBUG` |
-| `EMBEDDER` | `hashing` | Эмбеддер: `hashing` — feature hashing без модели, для разработки; `openai` — OpenAI embeddings |
+| `EMBEDDER` | `hashing` | Эмбеддер: `hashing` — feature hashing без модели, для разработки; `openai` — OpenAI embeddings; `e5`, `bge-m3` — локально через transformers (группа `local-models`) |
+| `EMBEDDER_DEVICE`, `RERANKER_DEVICE` | `cpu` | Устройство для локальных моделей (`cpu`, `cuda`) |
 | `OPENAI_API_KEY` | — | Обязателен при `EMBEDDER=openai` и LLM `openai` |
 | `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | Модель OpenAI; размерность приводится к 1024 параметром `dimensions` |
 | `EMBEDDING_BATCH_SIZE` | `128` | Текстов в одном запросе к эмбеддеру |
 | `EMBEDDING_CACHE_SIZE` | `10000` | LRU-кэш эмбеддингов по SHA-256 текста; `0` — выключен |
+| `SEARCH_MODE` | `bm25` | Поиск по умолчанию для `/search` и `/ask`: `vector`, `bm25` или `hybrid` (RRF); выбран по eval |
+| `RRF_K` | `60` | Константа сглаживания RRF |
+| `RERANKER` | `none` | `bge` — cross-encoder `bge-reranker-v2-m3` поверх `RERANK_CANDIDATES` (20) кандидатов; нужна группа `local-models` |
 | `VECTOR_STORE` | `qdrant` | Хранилище для `/search` по умолчанию: `qdrant` или `pgvector`; в запросе переопределяется полем `store` |
 | `CHUNK_SIZE`, `CHUNK_OVERLAP` | `300`, `45` | Размер чанка и перекрытие в токенах эмбеддера (см. «Обработка документов») |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `rag` | Учётные данные Postgres |
@@ -241,9 +245,14 @@ PYTHONPATH=. uv run python scripts/bench_vector_stores.py   # нужен docker 
 
 `/ask`: поиск top-k → фильтр по `RAG_MIN_SCORE` → бюджет контекста → промпт → LLM → валидация → источники.
 
-- **Промпт** — `services/api/prompts/answer/v1/` (`system.md`, `user.md`, `retry.md`). Правила: только по контексту,
-  чанки пронумерованы `[1]…[k]` с файлом, страницей и разделом, при отсутствии ответа — фраза
-  «В документах нет ответа на этот вопрос.». Версия (`answer/v1`) пишется в лог каждого запроса.
+- **Промпт** — `services/api/prompts/answer/<версия>/`: `system.md`, `user.md`, `chunk.md` (формат чанка), `retry.md`,
+  `examples.json` (few-shot). Правила: только по контексту, чанки пронумерованы с файлом, страницей и разделом,
+  при отсутствии ответа — фраза «В документах нет ответа на этот вопрос.». Версия пишется в лог каждого запроса.
+  `v2` (по умолчанию): контекст в `<документы>` / `<фрагмент номер="N" …>`, `<` и `>` в тексте чанка экранируются —
+  документ не может закрыть свой тег и подделать фрагмент (prompt injection); два few-shot примера (ответ и отказ
+  на инъекцию). Цена — 2 240 токенов на запрос против 1 896 у `v1` (+18%); влияние на качество с реальной LLM не измерено.
+- **Регрессия промпта** (FR-7.5) — `uv run pytest tests/prompts`: 16 офлайн-проверок шаблонов всех версий;
+  `-m llm` с ключом провайдера — 14 вопросов к реальной LLM (цитирует ли нужный файл, отказ вне базы).
 - **Структурированный ответ** — strict JSON Schema (`answer`, `sources`, `confidence`) у OpenAI и GigaChat, затем
   Pydantic `LLMAnswer`: номера источников вне `1..k` — ошибка. Невалидный ответ — один повтор с текстом ошибки, затем
   отказ. Ответ без источников тоже превращается в отказ.
@@ -264,6 +273,18 @@ curl -N localhost:8000/ask/stream -H 'Content-Type: application/json' -d '{"ques
 Бюджет контекста на этом вопросе (top-5, токенизатор `o200k_base`): system 250 + вопрос 13 + чанки 1 109 + служебные 11
 + ответ до 512 = 1 895 токенов. Качество ответов с реальной LLM (верный документ на 5 вопросах, отказ вне базы) ещё
 не измерено: проверено только с `stub` и на тестах с замоканной LLM.
+
+## Гибридный поиск
+
+- **BM25** — Postgres full-text (`tsvector`, словарь `russian`, GIN). Встроенный `ts_rank` не учитывает IDF,
+  поэтому BM25 (k1 = 1.2, b = 0.75) считается SQL-запросом: кандидаты по GIN, tf из позиций лексем, df и средняя
+  длина по чанкам.
+- **Гибрид** — векторный и BM25 параллельно, слияние Reciprocal Rank Fusion (`1 / (60 + rank)`): по рангам, а не
+  скорам, потому что cosine и BM25 в разных шкалах. В ответе `/search` у чанка `found_by` — каким поиском найден.
+- **Reranker** — cross-encoder `bge-reranker-v2-m3` за `Protocol` `Reranker`: top-20 → top-k, включается
+  `RERANKER=bge` или `rerank: true` в запросе.
+- Локальные модели (reranker, e5, BGE-M3) — опциональная группа зависимостей, в Docker-образ не входит:
+  `uv sync --group local-models` (torch CPU).
 
 ## Разработка
 
@@ -300,21 +321,48 @@ uv run python scripts/eval_retrieval.py --config <name>   # recall@1/3/5, MRR
 uv run python scripts/eval_latency.py                     # p50/p95 по этапам
 ```
 
-Датасет: 50 вопросов с эталонными чанками и ответами, из них не меньше 5 — вне базы.
-Результаты сохраняются в `services/api/eval/results/`.
+Корпус — 8 вымышленных регламентов в [`data/`](data/). Датасет `services/api/eval/questions.jsonl`: 50 вопросов
+(факт, перефраз, процедура) с эталоном `{file, contains}` и эталонным ответом, из них 6 — вне базы.
+Скрипт поднимает отдельную БД `rag_eval` в Postgres из compose, индексирует `data/` и пишет результат
+в `services/api/eval/results/<дата>_<конфиг>.json`:
 
-| Конфигурация | recall@5 | MRR |
-|--------------|----------|-----|
-| Векторный поиск (baseline) | — | — |
-| Гибрид (BM25 + векторы, RRF) | — | — |
-| Гибрид + reranker | — | — |
+```bash
+cd services/api
+uv run python scripts/eval_retrieval.py --mode vector,bm25,hybrid   # нужен docker compose up (Postgres)
+uv run python scripts/eval_retrieval.py --mode hybrid --embedder e5 --rerank   # локальные модели
+```
+
+Baseline: эмбеддер `hashing`, Qdrant, чанк 300 / перекрытие 45, 44 вопроса из базы, k = 5.
+
+| Конфигурация | recall@1 | recall@3 | recall@5 | MRR | поиск p95, мс |
+|--------------|----------|----------|----------|-----|---------------|
+| Векторный (`hashing`) | 0.636 | 0.773 | 0.795 | 0.705 | 3.1 |
+| BM25 | 0.886 | 0.932 | **0.955** | 0.911 | 6.7 |
+| Гибрид (RRF) | 0.795 | 0.818 | 0.909 | 0.837 | 7.1 |
+| Гибрид + reranker | — | — | — | — | — |
+
+- По умолчанию включён BM25 — лучший из измеренных. Гибрид проиграл, потому что `hashing` — та же лексика без
+  стемминга: RRF подмешивает ошибки более слабого ретривера. Гибрид имеет смысл с семантическим эмбеддером.
+- Цифры завышены составом датасета: вопросы написаны по тексту документов, лексическое пересечение выше, чем у живых
+  пользователей. На перефразах BM25 даёт 0.895, вектор — 0.737.
+- Промах всех методов — «Когда можно лететь самолётом?» при «авиаперелёт» в тексте: нет общих слов.
+- Порог `RAG_MIN_SCORE` не помогает: score BM25 у вопросов вне базы (1.9–7.4) пересекается с верными (от 2.5);
+  отказ на такие вопросы обеспечивает промпт.
+- Reranker и эмбеддеры e5 / BGE-M3 / OpenAI реализованы, но не измерены: нужен прогон локальных моделей или ключ.
+
+| Эмбеддер | Размерность | recall@5 (vector) | Индексация корпуса | Запрос p50 |
+|----------|-------------|-------------------|--------------------|------------|
+| `hashing` (без модели) | 1024 | 0.795 | 0.2 с | 2.3 мс |
+| OpenAI `text-embedding-3-small` | 1024 | — | — | — |
+| `multilingual-e5-base` | 768 → 1024 | — | — | — |
+| `bge-m3` | 1024 | — | — | — |
 
 | Метрика | Цель | Факт |
 |---------|------|------|
-| recall@5, лучшая конфигурация | ≥ 0.85 | — |
+| recall@5, лучшая конфигурация | ≥ 0.85 | 0.955 (BM25; датасет смещён к лексике, см. выше) |
 | Задержка до первого звука, p95 | ≤ 2.5 с | — |
 | Задержка до первого токена, p95 | ≤ 1.5 с | — |
-| Поиск (retrieve + rerank), p95 | ≤ 300 мс | — |
+| Поиск (retrieve + rerank), p95 | ≤ 300 мс | 6.7 мс (BM25, без reranker, 52 чанка) |
 | Выдуманные ответы на вопросы вне базы | 0 | — |
 
 Таблицы заполняются только реально измеренными значениями.
