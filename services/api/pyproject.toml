@@ -30,9 +30,22 @@ dev = [
     "types-docker>=7.2.0.20261006",
     "types-reportlab>=5.0.0.20261008",
 ]
+local-models = [
+    "torch>=2.5",
+    "transformers>=4.46",
+]
 
 [tool.uv]
 package = false
+default-groups = ["dev"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
 
 [tool.ruff]
 line-length = 100
@@ -49,8 +62,11 @@ python_version = "3.12"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["-m", "not integration"]
-markers = ["integration: тесты против реальных Postgres и Qdrant в testcontainers"]
+addopts = ["-m", "not integration and not llm"]
+markers = [
+    "integration: тесты против реальных Postgres и Qdrant в testcontainers",
+    "llm: регрессия промпта против реального LLM, нужен ключ провайдера в окружении",
+]
 filterwarnings = [
     "ignore:Payload indexes have no effect in the local Qdrant:UserWarning",
     "ignore:Local mode performs exact:UserWarning",

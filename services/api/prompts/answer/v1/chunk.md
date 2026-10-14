@@ -1,0 +1,2 @@
+[$number] ($meta)
+$text

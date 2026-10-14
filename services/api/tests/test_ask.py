@@ -17,7 +17,7 @@ def test_ask_without_documents_refuses(client: TestClient) -> None:
     assert body["answer"] == NO_ANSWER
     assert body["sources"] == []
     assert body["confidence"] == 0.0
-    assert {"embed", "search", "total"} <= set(body["latency"])
+    assert {"bm25", "total"} <= set(body["latency"])
 
 
 def test_ask_answers_with_source_file_and_page(client: TestClient) -> None:
@@ -36,7 +36,7 @@ def test_ask_answers_with_source_file_and_page(client: TestClient) -> None:
         "quote": "Файлы больше двадцати мегабайт отклоняются.",
     }
     assert body["confidence"] == 0.5
-    assert {"embed", "search", "llm", "total"} <= set(body["latency"])
+    assert {"bm25", "llm", "total"} <= set(body["latency"])
 
 
 class EchoLLM(StubLLMClient):
@@ -49,10 +49,10 @@ class EchoLLM(StubLLMClient):
 def test_ask_uses_llm_from_lifespan() -> None:
     with TestClient(build_app(llm_factory=EchoLLM)) as client:
         upload(client, "faq.md", FAQ)
-        response = client.post("/ask", json={"question": "привет"})
+        response = client.post("/ask", json={"question": "файлы больше"})
 
     body = response.json()
-    assert body["answer"] == "echo: привет"
+    assert body["answer"] == "echo: файлы больше"
     assert body["sources"][0]["filename"] == "faq.md"
 
 

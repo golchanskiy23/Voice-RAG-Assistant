@@ -28,6 +28,7 @@ def settings(store: str = "qdrant") -> Settings:
         qdrant_url=TEST_QDRANT_URL,
         admin_api_key=TEST_ADMIN_API_KEY,
         vector_store=store,
+        search_mode="vector",
     )
 
 

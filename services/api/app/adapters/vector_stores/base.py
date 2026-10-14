@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 
 StoreName = Literal["pgvector", "qdrant"]
+Retriever = Literal["vector", "bm25"]
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class SearchHit:
     page: int | None
     section: str | None
     score: float
+    found_by: tuple[Retriever, ...] = ("vector",)
 
 
 class VectorStore(Protocol):

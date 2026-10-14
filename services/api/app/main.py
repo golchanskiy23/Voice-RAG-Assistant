@@ -10,6 +10,8 @@ from app.adapters.embedders.base import Embedder, ensure_chunk_fits, ensure_dime
 from app.adapters.embedders.registry import build_embedder
 from app.adapters.llm.base import LLMClient
 from app.adapters.llm.registry import build_llm
+from app.adapters.rerankers.base import Reranker
+from app.adapters.rerankers.registry import build_reranker
 from app.adapters.vector_stores.base import StoreName, VectorStore
 from app.adapters.vector_stores.pgvector import PgVectorStore
 from app.adapters.vector_stores.qdrant import QdrantVectorStore
@@ -21,6 +23,7 @@ from app.core.logging import configure_logging
 from app.core.qdrant import Qdrant
 from app.core.request_id import request_id_middleware
 from app.core.tokens import count_llm_tokens
+from app.repositories.fulltext import KeywordIndex, PostgresBM25
 from app.services.prompts import load_answer_prompt
 
 STARTUP_TIMEOUT_SECONDS = 3.0
@@ -33,13 +36,24 @@ def create_app(
     qdrant_factory: Callable[[Settings], Qdrant] | None = None,
     embedder_factory: Callable[[], Embedder] | None = None,
     count_tokens: Callable[[str], int] = count_llm_tokens,
+    keyword_factory: Callable[[Database], KeywordIndex] = PostgresBM25,
+    reranker_factory: Callable[[], Reranker | None] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolved = settings or get_settings()
         configure_logging(resolved.log_level)
         prompt = load_answer_prompt(resolved.prompts_dir, resolved.prompt_version)
-        embedder = embedder_factory() if embedder_factory else build_embedder(resolved)
+        embedder = (
+            embedder_factory()
+            if embedder_factory
+            else await asyncio.to_thread(build_embedder, resolved)
+        )
+        reranker = (
+            reranker_factory()
+            if reranker_factory
+            else await asyncio.to_thread(build_reranker, resolved)
+        )
         ensure_dimension(embedder)
         ensure_chunk_fits(embedder, resolved.chunk_size)
         llm = llm_factory() if llm_factory else build_llm(resolved)
@@ -58,6 +72,8 @@ def create_app(
             "embedder": embedder,
             "llm": llm,
         }
+        if reranker is not None:
+            resources["reranker"] = reranker
         app.state.settings = resolved
         app.state.llm = llm
         app.state.embedder = embedder
@@ -66,6 +82,8 @@ def create_app(
         app.state.resources = resources
         app.state.vector_stores = vector_stores
         app.state.index = qdrant_store
+        app.state.keyword = keyword_factory(database)
+        app.state.reranker = reranker
         app.state.prompt = prompt
         app.state.count_tokens = count_tokens
         try:

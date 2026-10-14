@@ -183,3 +183,42 @@ def test_pgvector_returns_k_results_despite_dead_index_entries(
             await engine.dispose()
 
     assert asyncio.run(run()) == 5
+
+
+def test_bm25_finds_exact_terms(indexed: tuple[TestClient, dict[str, str]]) -> None:
+    client, ids = indexed
+
+    chunks = search(client, query="кто несёт ответственность за актуальность", k=3, mode="bm25")
+
+    assert chunks[0]["document_id"] == ids["regulation.pdf"]
+    assert "актуальность" in str(chunks[0]["text"])
+    assert chunks[0]["source"] == "bm25"
+    scores = [float(str(c["score"])) for c in chunks]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_bm25_respects_document_filter(indexed: tuple[TestClient, dict[str, str]]) -> None:
+    client, ids = indexed
+
+    chunks = search(client, query="документы", k=5, mode="bm25", doc_ids=[ids["spec.md"]])
+
+    assert chunks and {c["document_id"] for c in chunks} == {ids["spec.md"]}
+
+
+def test_bm25_with_only_stopwords_returns_nothing(
+    indexed: tuple[TestClient, dict[str, str]],
+) -> None:
+    client, _ = indexed
+
+    assert search(client, query="и в на", k=5, mode="bm25") == []
+
+
+def test_hybrid_marks_where_chunks_were_found(
+    indexed: tuple[TestClient, dict[str, str]],
+) -> None:
+    client, _ = indexed
+
+    chunks = search(client, query=QUERIES[3], k=10, mode="hybrid")
+
+    assert {c["source"] for c in chunks} <= {"vector", "bm25", "hybrid"}
+    assert any(c["source"] == "hybrid" for c in chunks)

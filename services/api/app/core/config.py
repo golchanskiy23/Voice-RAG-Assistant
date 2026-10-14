@@ -30,17 +30,24 @@ class Settings(DatabaseSettings):
     gigachat_verify_ssl: bool = True
     gigachat_ca_bundle_file: str | None = None
     prompts_dir: Path = PROMPTS_DIR
-    prompt_version: str = "v1"
+    prompt_version: str = "v2"
     rag_top_k: int = Field(default=5, ge=1, le=50)
     rag_min_score: float = 0.0
     rag_context_tokens: int = Field(default=3000, gt=0)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-    embedder: Literal["hashing", "openai"] = "hashing"
+    embedder: Literal["hashing", "openai", "e5", "bge-m3"] = "hashing"
+    embedder_device: str = "cpu"
     openai_api_key: SecretStr | None = None
     openai_embedding_model: str = "text-embedding-3-small"
     embedding_batch_size: int = Field(default=128, gt=0, le=2048)
     embedding_cache_size: int = Field(default=10_000, ge=0)
     vector_store: Literal["pgvector", "qdrant"] = "qdrant"
+    search_mode: Literal["vector", "bm25", "hybrid"] = "bm25"
+    rrf_k: int = Field(default=60, gt=0)
+    reranker: Literal["none", "bge"] = "none"
+    reranker_model: str = "BAAI/bge-reranker-v2-m3"
+    reranker_device: str = "cpu"
+    rerank_candidates: int = Field(default=20, ge=1, le=100)
     qdrant_url: AnyHttpUrl
     admin_api_key: SecretStr
     chunk_size: int = Field(default=300, gt=0)
