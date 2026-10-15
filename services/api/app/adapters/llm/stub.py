@@ -11,6 +11,7 @@ FIRST_CHUNK = re.compile(
     r"|^\[1\] \(.*?\)\n(?P<plain>.+?)(?:\n\n\[2\] |\n\nВопрос:)",
     re.S | re.M,
 )
+STUB_SENTENCES = 3
 SENTENCE = re.compile(r".+?[.!?](?=\s|$)", re.S)
 
 
@@ -21,9 +22,9 @@ def extractive_answer(request: LLMRequest) -> str:
         answer = {"answer": NO_ANSWER, "sources": [], "confidence": 0.0}
     else:
         text = " ".join((match["xml"] or match["plain"]).split())
-        sentence = SENTENCE.match(text)
+        sentences = SENTENCE.findall(text)[:STUB_SENTENCES]
         answer = {
-            "answer": (sentence[0] if sentence else text)[:300],
+            "answer": (" ".join(s.strip() for s in sentences) or text)[:300],
             "sources": [1],
             "confidence": 0.5,
         }

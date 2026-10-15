@@ -3,7 +3,14 @@ import asyncio
 import structlog
 
 from app.services.llm_answer import NO_ANSWER
-from app.services.rag import FinalEvent, RAGService, RAGSettings, StreamEvent, TokenEvent
+from app.services.rag import (
+    FinalEvent,
+    RAGService,
+    RAGSettings,
+    RetrievedEvent,
+    StreamEvent,
+    TokenEvent,
+)
 from tests.llm_fakes import PROMPT, ScriptedLLM, hit, make_service
 
 HITS = [
@@ -16,7 +23,9 @@ OUT_OF_CONTEXT = '{"answer": "Готово", "sources": [5], "confidence": 0.7}'
 
 def collect(service: RAGService, question: str) -> list[StreamEvent]:
     async def run() -> list[StreamEvent]:
-        return [event async for event in service.stream(question)]
+        events = [event async for event in service.stream(question)]
+        assert isinstance(events[0], RetrievedEvent)
+        return events[1:]
 
     return asyncio.run(run())
 

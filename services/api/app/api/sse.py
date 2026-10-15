@@ -4,7 +4,7 @@ from contextlib import aclosing
 from typing import Any, Literal, Protocol
 
 from app.api.schemas import SourceOut
-from app.services.rag import FinalEvent, StreamEvent, TokenEvent
+from app.services.rag import FinalEvent, RetrievedEvent, StreamEvent, TokenEvent
 
 SSEEvent = Literal["token", "sources", "done", "error"]
 
@@ -21,6 +21,8 @@ def format_sse(event: SSEEvent, data: dict[str, Any]) -> str:
 
 def encode_event(event: StreamEvent) -> list[str]:
     match event:
+        case RetrievedEvent():
+            return []
         case TokenEvent(text=text):
             return [format_sse("token", {"text": text})]
         case FinalEvent(sources=sources, confidence=confidence, latency_ms=latency):

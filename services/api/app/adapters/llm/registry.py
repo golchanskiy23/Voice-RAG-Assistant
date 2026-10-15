@@ -31,7 +31,7 @@ def gigachat_llm(settings: Settings) -> GigaChatLLMClient:
 
 
 llm_registry: Registry[Settings, LLMClient] = Registry("llm")
-llm_registry.register("stub", lambda _: StubLLMClient())
+llm_registry.register("stub", lambda s: StubLLMClient(token_delay=s.stub_llm_token_delay))
 llm_registry.register("openai", openai_llm)
 llm_registry.register("gigachat", gigachat_llm)
 

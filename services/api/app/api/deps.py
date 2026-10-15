@@ -1,5 +1,5 @@
 from collections.abc import AsyncIterator, Callable
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,6 +126,35 @@ def get_rag_service(
         llm,
         prompt,
         count_tokens,
+        RAGSettings(
+            top_k=settings.rag_top_k,
+            min_score=settings.rag_min_score,
+            context_tokens=settings.rag_context_tokens,
+            max_tokens=settings.llm_max_tokens,
+            temperature=settings.llm_temperature,
+        ),
+    )
+
+
+def rag_service_from_state(state: Any) -> RAGService:
+    settings: Settings = state.settings
+    search = SearchService(
+        state.embedder,
+        state.vector_stores,
+        SearchDefaults(
+            store=settings.vector_store,
+            mode=settings.search_mode,
+            rerank_candidates=settings.rerank_candidates,
+            rrf_k=settings.rrf_k,
+        ),
+        state.keyword,
+        state.reranker,
+    )
+    return RAGService(
+        search,
+        state.llm,
+        state.prompt,
+        state.count_tokens,
         RAGSettings(
             top_k=settings.rag_top_k,
             min_score=settings.rag_min_score,
