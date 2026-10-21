@@ -1,0 +1,49 @@
+{
+  "config": "sim_streaming_short_first",
+  "date": "2026-10-25",
+  "requests": 50,
+  "errors": 0,
+  "input": "text",
+  "server": {
+    "stt": "stub",
+    "tts": "stub"
+  },
+  "note": "симуляция без моделей: stub LLM 30 мс/токен, stub TTS RTF 0.15; BM25, hashing; VOICE_STREAMING=true, VOICE_FIRST_CHUNK_CHARS=80",
+  "latency_ms": {
+    "retrieve": {
+      "p50": 7.7,
+      "p95": 14.0,
+      "mean": 19.5
+    },
+    "first_token": {
+      "p50": 69.1,
+      "p95": 75.1,
+      "mean": 80.8
+    },
+    "first_sentence": {
+      "p50": 341.8,
+      "p95": 492.6,
+      "mean": 331.0
+    },
+    "first_synthesized": {
+      "p50": 1013.7,
+      "p95": 1578.5,
+      "mean": 964.0
+    },
+    "first_audio": {
+      "p50": 1017.1,
+      "p95": 1584.5,
+      "mean": 967.8
+    },
+    "total": {
+      "p50": 2324.0,
+      "p95": 3292.8,
+      "mean": 2457.2
+    },
+    "client_first_audio": {
+      "p50": 1018.3,
+      "p95": 1586.1,
+      "mean": 969.0
+    }
+  }
+}

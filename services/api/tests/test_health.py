@@ -21,7 +21,14 @@ def test_ready_when_llm_available(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "checks": {"postgres": True, "qdrant": True, "embedder": True, "llm": True},
+        "checks": {
+            "postgres": True,
+            "qdrant": True,
+            "embedder": True,
+            "llm": True,
+            "stt": True,
+            "tts": True,
+        },
     }
 
 
@@ -37,7 +44,14 @@ def test_ready_when_llm_unavailable() -> None:
     assert response.status_code == 503
     assert response.json() == {
         "status": "not_ready",
-        "checks": {"postgres": True, "qdrant": True, "embedder": True, "llm": False},
+        "checks": {
+            "postgres": True,
+            "qdrant": True,
+            "embedder": True,
+            "llm": False,
+            "stt": True,
+            "tts": True,
+        },
     }
 
 
@@ -78,6 +92,8 @@ def test_ready_treats_timeout_and_errors_as_not_ready(
         "qdrant": True,
         "embedder": True,
         "llm": False,
+        "stt": True,
+        "tts": True,
     }
 
 
@@ -91,6 +107,8 @@ def test_ready_reports_postgres_unavailable() -> None:
         "qdrant": True,
         "embedder": True,
         "llm": True,
+        "stt": True,
+        "tts": True,
     }
 
 
@@ -112,6 +130,8 @@ def test_ready_reports_qdrant_unavailable() -> None:
         "qdrant": False,
         "embedder": True,
         "llm": True,
+        "stt": True,
+        "tts": True,
     }
 
 

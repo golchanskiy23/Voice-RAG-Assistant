@@ -8,7 +8,8 @@ RAG реализован вручную, без LangChain, LlamaIndex и под�
 
 > **Статус:** в разработке — готовы каркас сервиса, инфраструктура, загрузка и индексация документов, векторный поиск
 > top-k в Qdrant и pgvector, BM25 и гибрид через RRF, eval поиска (baseline), ответ LLM (OpenAI / GigaChat
-> с fallback) со ссылкой на источник и SSE-стримингом; замеры reranker'а и локальных эмбеддеров и голос впереди.
+> с fallback) со ссылкой на источник и SSE-стримингом, голосовой пайплайн через WebSocket (STT → RAG → TTS
+> по предложениям, barge-in); впереди — замеры на реальных моделях (STT, TTS, reranker, эмбеддеры) и Telegram.
 > Полное техническое задание — [`docs/spec.md`](docs/spec.md).
 
 ## Возможности
@@ -70,16 +71,20 @@ LLM → валидация ответа → (TTS)**.
 ```
 services/api/          # Backend: FastAPI-сервис
   app/                 # api, services, adapters, repositories, core
+  prompts/             # шаблоны промптов по версиям
+  scripts/             # eval_retrieval, eval_latency, eval_stt, voice_client
+  eval/                # questions.jsonl и results/
   migrations/          # Alembic
-  tests/               # unit и integration (testcontainers)
+  tests/               # unit, integration (testcontainers), prompts
+frontend/voice/        # Веб-клиент для голоса
+contracts/             # Контракт событий WebSocket
+data/                  # Демо-документы для eval
 docs/spec.md           # Техническое задание
 .agents/skills/        # Навыки AI-агентов
 AGENTS.md              # Инструкции для AI-агентов
 docker-compose.yml     # api, migrate, postgres (pgvector), qdrant
 .env.example           # Пример конфигурации
 ```
-
-По мере развития появятся `frontend/` (веб-клиент для голоса), `contracts/` (OpenAPI, события WebSocket) и `data/` (демо-документы).
 
 ## Запуск
 
@@ -119,7 +124,7 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | GET | `/documents` | Список документов | план |
 | DELETE | `/documents/{id}` | Удалить документ и его чанки | план |
 | POST | `/search` | Поиск top-k чанков: `{query, k, doc_ids?, mode?: vector\|bm25\|hybrid, store?, rerank?}` → `{chunks: [{id, document_id, filename, ord, text, page, section, score, source, found_by}], store, mode, reranked, latency}` | ✅ |
-| WS | `/ws/voice` | Аудио → `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `done` | план |
+| WS | `/ws/voice` | PCM 16 кГц / ogg / wav или текст → `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `sources`, `done`, `interrupted` — контракт в [`contracts/ws-voice.md`](contracts/ws-voice.md) | ✅ |
 | POST | `/telegram/webhook` | Обновления Telegram | план |
 
 Ошибки возвращаются в едином формате: `{"error": {"code", "message", "request_id"}}`.
@@ -143,6 +148,11 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | `RAG_TOP_K` | `5` | Сколько чанков искать для ответа |
 | `RAG_MIN_SCORE` | `0.0` | Порог score: если ни один чанк не прошёл — отказ без вызова LLM |
 | `RAG_CONTEXT_TOKENS` | `3000` | Бюджет токенов на чанки в промпте; не поместившиеся отбрасываются с конца |
+| `STT` | `stub` | `faster-whisper` (группа `local-models`) или `stub` — без модели, возвращает фиксированный текст |
+| `WHISPER_MODEL`, `WHISPER_COMPUTE_TYPE` | `small`, `int8` | Модель и квантование faster-whisper (`float16` на GPU) |
+| `VAD`, `VAD_MIN_SILENCE_MS` | `energy`, `600` | Детектор речи: `energy` (RMS, без модели) или `silero`; тишина, после которой фраза закончена |
+| `TTS`, `TTS_SPEAKER`, `TTS_SAMPLE_RATE` | `stub`, `xenia`, `24000` | Синтез: `silero` (v4_ru, группа `local-models`) или `stub` — тон вместо речи |
+| `VOICE_STREAMING`, `VOICE_FIRST_CHUNK_CHARS` | `true`, `80` | Синтез по предложениям по мере генерации; первый фрагмент режется по запятой до N символов |
 | `LOG_LEVEL` | `INFO` | Уровень логов; текст вопроса пишется только на `DEBUG` |
 | `EMBEDDER` | `hashing` | Эмбеддер: `hashing` — feature hashing без модели, для разработки; `openai` — OpenAI embeddings; `e5`, `bge-m3` — локально через transformers (группа `local-models`) |
 | `EMBEDDER_DEVICE`, `RERANKER_DEVICE` | `cpu` | Устройство для локальных моделей (`cpu`, `cuda`) |
@@ -286,6 +296,45 @@ curl -N localhost:8000/ask/stream -H 'Content-Type: application/json' -d '{"ques
 - Локальные модели (reranker, e5, BGE-M3) — опциональная группа зависимостей, в Docker-образ не входит:
   `uv sync --group local-models` (torch CPU).
 
+## Голос
+
+`/ws/voice`: аудио → VAD (конец фразы) → STT → RAG → LLM-стрим → буфер предложений → TTS → `audio_chunk`.
+Этапы развязаны `asyncio.Queue`: пока синтезируется первое предложение, LLM генерирует следующие.
+
+- **STT** — faster-whisper (CTranslate2, int8 на CPU, `ru`), partial-распознавание раз в секунду накопленного
+  аудио, final — после конца фразы. ogg/opus (Telegram), wav, mp3 → PCM через ffmpeg.
+- **VAD** — энергетический (без модели) или silero-vad; pre-roll 300 мс, чтобы не обрезать начало слова.
+- **TTS** — Silero `v4_ru`, синтез в executor. Перед синтезом текст нормализуется: без `[n]`, markdown и ссылок,
+  числа словами (`1 500 ₽` → «одна тысяча пятьсот рублей», `11:00`, `20 МБ`).
+- **Barge-in** — речь во время ответа отменяет задачу ответа: останавливается LLM-стрим и синтез, клиенту `interrupted`.
+- **Клиенты** — веб: `python -m http.server -d frontend/voice 8080` → http://localhost:8080 (микрофон, лучше в
+  наушниках); CLI: `uv run python scripts/voice_client.py --audio вопрос.ogg` или `--text "..."`.
+
+Замеры (из `services/api`, при запущенном compose):
+
+```bash
+uv run python scripts/eval_latency.py --config <name> --n 50                 # вопросы текстом из eval
+uv run python scripts/eval_latency.py --config <name> --audio-dir записи/ --realtime
+uv run python scripts/eval_stt.py записи/                                     # WER и RTF, пары .wav + .txt
+```
+
+Задержка до первого звука, мс (p50 / p95), 50 запросов. **Симуляция без моделей**: stub LLM — 30 мс на токен,
+stub TTS — RTF 0.15; цифры показывают эффект архитектуры, а не задержку реальных STT/LLM/TTS (NFR-2 не измерен).
+
+| Этап | Последовательно | Стриминг по предложениям | + короткий первый фрагмент |
+|------|-----------------|--------------------------|----------------------------|
+| retrieve | 8 / 14 | 7 / 14 | 8 / 14 |
+| первый токен LLM | 69 / 77 | 68 / 76 | 69 / 75 |
+| первое предложение | 1014 / 1344 | 494 / 870 | 342 / 493 |
+| первый аудио-чанк | 2076 / 2828 | 1510 / 2253 | **1017 / 1584** |
+| ответ целиком | 2998 / 4310 | 2445 / 3418 | 2324 / 3293 |
+
+- Узкое место — синтез первого фрагмента: время TTS растёт с длиной текста, поэтому первый фрагмент режется
+  по запятой. Вместе со стримингом это −44% p95 до первого звука на симуляции.
+- Сервер считает от `speech_end`; ожидание тишины VAD (`VAD_MIN_SILENCE_MS`, 600 мс) добавляется сверху —
+  его видно в клиентском замере в аудио-режиме.
+- WER/RTF faster-whisper и задержка с реальными моделями не измерены: нужны записи и прогон моделей.
+
 ## Разработка
 
 Нужен [uv](https://docs.astral.sh/uv/). Команды — из `services/api`:
@@ -360,7 +409,7 @@ Baseline: эмбеддер `hashing`, Qdrant, чанк 300 / перекрыти�
 | Метрика | Цель | Факт |
 |---------|------|------|
 | recall@5, лучшая конфигурация | ≥ 0.85 | 0.955 (BM25; датасет смещён к лексике, см. выше) |
-| Задержка до первого звука, p95 | ≤ 2.5 с | — |
+| Задержка до первого звука, p95 | ≤ 2.5 с | — (на симуляции без моделей 1.58 с, см. «Голос») |
 | Задержка до первого токена, p95 | ≤ 1.5 с | — |
 | Поиск (retrieve + rerank), p95 | ≤ 300 мс | 6.7 мс (BM25, без reranker, 52 чанка) |
 | Выдуманные ответы на вопросы вне базы | 0 | — |
