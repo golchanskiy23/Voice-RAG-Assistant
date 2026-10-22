@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from app.api.deps import RAGServiceDep
+from app.api.deps import DialogServiceDep, RAGServiceDep
 from app.api.schemas import AskRequest, AskResponse, SourceOut
 from app.api.sse import SSE_HEADERS, stream_sse
 
@@ -9,8 +9,12 @@ router = APIRouter(tags=["rag"])
 
 
 @router.post("/ask")
-async def ask(payload: AskRequest, rag: RAGServiceDep) -> AskResponse:
-    answer = await rag.answer(payload.question)
+async def ask(payload: AskRequest, rag: RAGServiceDep, dialog: DialogServiceDep) -> AskResponse:
+    if payload.session_id:
+        result = await dialog.answer(f"api:{payload.session_id}", payload.question)
+        answer = result.answer
+    else:
+        answer = await rag.answer(payload.question)
     return AskResponse(
         answer=answer.text,
         sources=[

@@ -6,11 +6,25 @@
 RAG реализован вручную, без LangChain, LlamaIndex и подобных фреймворков. Качество поиска и задержка голосового
 ответа измеряются воспроизводимым eval.
 
-> **Статус:** в разработке — готовы каркас сервиса, инфраструктура, загрузка и индексация документов, векторный поиск
-> top-k в Qdrant и pgvector, BM25 и гибрид через RRF, eval поиска (baseline), ответ LLM (OpenAI / GigaChat
-> с fallback) со ссылкой на источник и SSE-стримингом, голосовой пайплайн через WebSocket (STT → RAG → TTS
-> по предложениям, barge-in); впереди — замеры на реальных моделях (STT, TTS, reranker, эмбеддеры) и Telegram.
-> Полное техническое задание — [`docs/spec.md`](docs/spec.md).
+Каналы: REST (`/ask`, SSE-стрим), WebSocket для голоса в реальном времени, Telegram-бот на вебхуках.
+
+## Результаты
+
+Все цифры — реальные прогоны скриптов из репозитория; что не измерено, помечено прочерком.
+
+| Что | Как мерил | Результат |
+|-----|-----------|-----------|
+| Поиск: recall@5 / MRR | 44 вопроса по 8 демо-документам (корпус удалён), `eval_retrieval.py` | вектор 0.795 / 0.705 → **BM25 0.955 / 0.911**, гибрид 0.909 / 0.837 |
+| Поиск: задержка p95 | тот же прогон | 6.7 мс (BM25) |
+| Первый звук голосового ответа, p95 | 50 запросов через WebSocket, **симуляция**: stub LLM 30 мс/токен, stub TTS RTF 0.15 | 2 828 → **1 585 мс** (−44%): синтез по предложениям + короткий первый фрагмент |
+| Тесты | `pytest` | 282 unit + 33 интеграционных (Postgres, Qdrant в testcontainers) |
+| С реальными моделями | — | не измерено: recall для e5 / BGE-M3 / OpenAI, reranker, WER/RTF whisper, p95 с Silero, ответы LLM на 14 регрессионных вопросах |
+
+Оговорки: вопросы eval написаны по тексту документов — это завышает BM25; эмбеддер в baseline — `hashing` без модели.
+Подробности и разбор промахов — «Оценка качества» и «Голос».
+
+**Демо:** видео и ссылка на бота — после деплоя на VPS (инструкция готова, [`docs/deploy.md`](docs/deploy.md)).
+Полное ТЗ — [`docs/spec.md`](docs/spec.md).
 
 ## Возможности
 
@@ -78,7 +92,6 @@ services/api/          # Backend: FastAPI-сервис
   tests/               # unit, integration (testcontainers), prompts
 frontend/voice/        # Веб-клиент для голоса
 contracts/             # Контракт событий WebSocket
-data/                  # Демо-документы для eval
 docs/spec.md           # Техническое задание
 .agents/skills/        # Навыки AI-агентов
 AGENTS.md              # Инструкции для AI-агентов
@@ -94,12 +107,15 @@ docker-compose.yml     # api, migrate, postgres (pgvector), qdrant
 docker compose up -d --build --wait
 ```
 
-Команда соберёт образ, поднимет Postgres и Qdrant, применит миграции (сервис `migrate`) и запустит api.
+Команда соберёт образ, поднимет Postgres, Qdrant и Redis, применит миграции (сервис `migrate`) и запустит api.
+Без ключей всё работает на заглушках: `EMBEDDER=hashing`, `LLM_PROVIDER=stub`, `STT=stub`, `TTS=stub`.
 Без `.env` используются значения для разработки. Для своих значений: `cp .env.example .env` и отредактировать.
 
 ```bash
 curl localhost:8000/health    # {"status":"ok"}
-curl localhost:8000/ready     # {"status":"ready","checks":{"postgres":true,"qdrant":true,"embedder":true,"llm":true}}
+curl localhost:8000/ready     # {"status":"ready","checks":{"postgres":true,"qdrant":true,...,"redis":true}}
+curl -s -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@docs/spec.md
+curl -s localhost:8000/ask -H 'Content-Type: application/json' -d '{"question": "Какой лимит размера файла?"}'
 ```
 
 - OpenAPI-документация — http://localhost:8000/docs
@@ -117,15 +133,15 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | Метод | Путь | Назначение | Статус |
 |-------|------|------------|--------|
 | GET | `/health` | Процесс жив | ✅ |
-| GET | `/ready` | Postgres, Qdrant, эмбеддер и LLM доступны, иначе 503 | ✅ |
+| GET | `/ready` | Postgres, Qdrant, Redis, эмбеддер, LLM, STT, TTS доступны, иначе 503 | ✅ |
 | POST | `/documents` | Загрузить PDF/Markdown до 20 МБ (API-ключ в `X-API-Key`): парсинг, чанкинг, эмбеддинги, запись чанков в Postgres (+ pgvector) и Qdrant; тот же файл → тот же `id`, новая версия с тем же именем заменяет старую | ✅ |
-| POST | `/ask` | Ответ целиком: `{answer, sources: [{filename, page, section, quote}], confidence, latency}` | ✅ |
+| POST | `/ask` | Ответ целиком: `{answer, sources: [{filename, page, section, quote}], confidence, latency}`; с `session_id` — с историей диалога ([`contracts/http-api.md`](contracts/http-api.md)) | ✅ |
 | POST | `/ask/stream` | SSE: `token` (текст ответа), `sources` (источники и confidence), `done` (latency), `error` | ✅ |
 | GET | `/documents` | Список документов | план |
 | DELETE | `/documents/{id}` | Удалить документ и его чанки | план |
 | POST | `/search` | Поиск top-k чанков: `{query, k, doc_ids?, mode?: vector\|bm25\|hybrid, store?, rerank?}` → `{chunks: [{id, document_id, filename, ord, text, page, section, score, source, found_by}], store, mode, reranked, latency}` | ✅ |
 | WS | `/ws/voice` | PCM 16 кГц / ogg / wav или текст → `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `sources`, `done`, `interrupted` — контракт в [`contracts/ws-voice.md`](contracts/ws-voice.md) | ✅ |
-| POST | `/telegram/webhook` | Обновления Telegram | план |
+| POST | `/telegram/webhook` | Обновления Telegram: проверка `X-Telegram-Bot-Api-Secret-Token`, дедуп по `update_id`, обработка в фоне | ✅ |
 
 Ошибки возвращаются в едином формате: `{"error": {"code", "message", "request_id"}}`.
 Каждый ответ содержит заголовок `X-Request-ID`.
@@ -153,6 +169,12 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | `VAD`, `VAD_MIN_SILENCE_MS` | `energy`, `600` | Детектор речи: `energy` (RMS, без модели) или `silero`; тишина, после которой фраза закончена |
 | `TTS`, `TTS_SPEAKER`, `TTS_SAMPLE_RATE` | `stub`, `xenia`, `24000` | Синтез: `silero` (v4_ru, группа `local-models`) или `stub` — тон вместо речи |
 | `VOICE_STREAMING`, `VOICE_FIRST_CHUNK_CHARS` | `true`, `80` | Синтез по предложениям по мере генерации; первый фрагмент режется по запятой до N символов |
+| `REDIS_URL` | `redis://redis:6379/0` | История диалога, дедуп update, rate limit; без него — в памяти процесса |
+| `DIALOG_MAX_TURNS`, `DIALOG_TTL_SECONDS` | `10`, `86400` | Сколько реплик хранить и сколько живёт история |
+| `REWRITE_ENABLED` | `true` | Переформулировать уточняющий вопрос LLM перед поиском (промпт `prompts/rewrite/v1/`) |
+| `TELEGRAM_TOKEN`, `TELEGRAM_SECRET` | — | Токен бота и секрет вебхука; без токена бот выключен |
+| `TELEGRAM_WEBHOOK_URL` | — | Если задан — вебхук регистрируется при старте (в prod: `https://$DOMAIN/telegram/webhook`) |
+| `TELEGRAM_WHITELIST`, `TELEGRAM_RATE_LIMIT` | —, `10` | chat_id через запятую (пусто — все); вопросов в минуту на пользователя |
 | `LOG_LEVEL` | `INFO` | Уровень логов; текст вопроса пишется только на `DEBUG` |
 | `EMBEDDER` | `hashing` | Эмбеддер: `hashing` — feature hashing без модели, для разработки; `openai` — OpenAI embeddings; `e5`, `bge-m3` — локально через transformers (группа `local-models`) |
 | `EMBEDDER_DEVICE`, `RERANKER_DEVICE` | `cpu` | Устройство для локальных моделей (`cpu`, `cuda`) |
@@ -335,6 +357,38 @@ stub TTS — RTF 0.15; цифры показывают эффект архите
   его видно в клиентском замере в аудио-режиме.
 - WER/RTF faster-whisper и задержка с реальными моделями не измерены: нужны записи и прогон моделей.
 
+## Telegram-бот
+
+aiogram 3 внутри того же FastAPI: `POST /telegram/webhook` → проверка секрета → дедуп `update_id` в Redis (`SET NX`,
+TTL 1 ч) → ответ 200 сразу, обработка в фоне (Telegram повторяет запрос, если ответ дольше ~60 с).
+
+- **Текст** → история диалога → переформулировка → RAG → ответ с источниками (HTML).
+- **Голосовое** (ogg/opus) → скачать → ffmpeg → STT → то же → ответ текстом и голосом (`sendVoice`, opus 32 кбит/с).
+- **Диалог** — история по `chat_id` в Redis (список, `LTRIM` до `DIALOG_MAX_TURNS`, TTL 24 ч), `/reset` очищает.
+  Уточняющий вопрос («а сколько это стоит?») LLM переписывает в самостоятельный («Сколько стоит ДМС для
+  родственников?») по последним репликам; при ошибке LLM ищется исходный вопрос. С `stub`-LLM вместо
+  переформулировки — склейка с прошлым вопросом.
+- **Защита** — whitelist `chat_id`, rate limit 10 вопросов в минуту на пользователя (`INCR` + `EXPIRE`),
+  голосовые длиннее 60 с отклоняются; индикатор «печатает…» / «записывает голосовое…» обновляется каждые 4 с.
+
+Логика бота (`app/services/telegram.py`) отделена от aiogram интерфейсом `Messenger` и тестируется без сети;
+маршрутизация aiogram проверяется на фейковой HTTP-сессии бота. Живого бота в этой работе не запускал — нет токена.
+
+## Деплой
+
+`docker-compose.prod.yml` поверх основного: Caddy с автоматическим HTTPS (Let's Encrypt), наружу только 80/443,
+`restart: always`, лимиты памяти под VPS с 4 ГБ, ротация логов (5 × 10 МБ), volume для весов моделей,
+секреты из `.env`. Сборка с локальными моделями — `WITH_LOCAL_MODELS=1`.
+
+```bash
+deploy/deploy.sh                                     # git pull → build → up --wait → проверка /health
+15 3 * * * /home/deploy/Voice-RAG-Assistant/deploy/backup.sh   # cron: pg_dump, хранить 14 дней
+```
+
+Подготовка VPS (пользователь без root, ssh по ключу, ufw), переменные, память, логи, восстановление —
+[`docs/deploy.md`](docs/deploy.md). Конфиги проверены (`docker compose config`, `caddy validate`), бэкап — на
+локальном стеке; на реальном VPS не разворачивалось.
+
 ## Разработка
 
 Нужен [uv](https://docs.astral.sh/uv/). Команды — из `services/api`:
@@ -370,15 +424,16 @@ uv run python scripts/eval_retrieval.py --config <name>   # recall@1/3/5, MRR
 uv run python scripts/eval_latency.py                     # p50/p95 по этапам
 ```
 
-Корпус — 8 вымышленных регламентов в [`data/`](data/). Датасет `services/api/eval/questions.jsonl`: 50 вопросов
+Baseline ниже снят на демо-корпусе из 8 документов, который удалён из репозитория; для повторного прогона
+нужен свой корпус в `--data-dir` и датасет под него. Датасет `services/api/eval/questions.jsonl`: 50 вопросов
 (факт, перефраз, процедура) с эталоном `{file, contains}` и эталонным ответом, из них 6 — вне базы.
-Скрипт поднимает отдельную БД `rag_eval` в Postgres из compose, индексирует `data/` и пишет результат
+Скрипт поднимает отдельную БД `rag_eval` в Postgres из compose, индексирует `--data-dir` и пишет результат
 в `services/api/eval/results/<дата>_<конфиг>.json`:
 
 ```bash
 cd services/api
-uv run python scripts/eval_retrieval.py --mode vector,bm25,hybrid   # нужен docker compose up (Postgres)
-uv run python scripts/eval_retrieval.py --mode hybrid --embedder e5 --rerank   # локальные модели
+uv run python scripts/eval_retrieval.py --data-dir <корпус> --mode vector,bm25,hybrid   # нужен docker compose up
+uv run python scripts/eval_retrieval.py --data-dir <корпус> --mode hybrid --embedder e5 --rerank
 ```
 
 Baseline: эмбеддер `hashing`, Qdrant, чанк 300 / перекрытие 45, 44 вопроса из базы, k = 5.
@@ -418,16 +473,26 @@ Baseline: эмбеддер `hashing`, Qdrant, чанк 300 / перекрыти�
 
 ## Этапы
 
-1. **Текстовый RAG** — загрузка документов, векторный поиск, `/ask` со ссылкой на источник, отказ на вопросы вне базы.
-2. **Оценка** — eval-датасет, гибридный поиск, reranker, сравнение трёх эмбеддеров.
-3. **Голос** — голос → голос через WebSocket, замер p50/p95 до и после оптимизации.
-4. **Канал и деплой** — Telegram-бот, диалог в Redis, деплой на VPS по HTTPS.
+1. **Текстовый RAG** — ✅ загрузка документов, векторный поиск, `/ask` со ссылкой на источник; отказ вне базы — проверить на реальной LLM.
+2. **Оценка** — ✅ eval-датасет, BM25, гибрид, baseline; ⏳ reranker и сравнение трёх эмбеддеров (нужен прогон моделей).
+3. **Голос** — ✅ голос → голос через WebSocket, p50/p95 до и после оптимизации на симуляции; ⏳ WER/RTF и замер на моделях.
+4. **Канал и деплой** — ✅ Telegram-бот, диалог в Redis, prod-compose с HTTPS; ⏳ развернуть на VPS.
 
 ## Решения
 
-- **Без RAG-фреймворков.** Чанкинг, RRF, rerank и промпты написаны вручную: каждый этап прозрачен и измеряется отдельно.
-- **Гибридный поиск.** BM25 ловит точные термины и коды, векторы — перефразировки; RRF объединяет их без подбора весов.
-- **Структурированный ответ.** Pydantic-схема с номерами источников отсекает ссылки на несуществующие чанки, а порог score — ответы без опоры на документы.
+- **Без RAG-фреймворков.** Чанкинг, BM25, RRF, rerank и промпты написаны вручную: каждый этап прозрачен,
+  заменяется через `Protocol` и измеряется отдельно; нет скрытых промптов и ретраев внутри чужой абстракции.
+- **Чанк 300 токенов, перекрытие 15%.** Влезает в лимит e5 (512) с запасом, цитата и страница остаются точными,
+  top-5 ≈ 1 500 токенов контекста. Пока гипотеза — проверить recall@5 для 150 / 300 / 500 на eval.
+- **BM25 по умолчанию, гибрид — с семантическим эмбеддером.** На baseline BM25 лучше всего (0.955); гибрид
+  проиграл, потому что `hashing` — та же лексика без стемминга. Эмбеддер выбирается по таблице трёх эмбеддеров
+  после прогона; до него — OpenAI в проде (не грузит RAM VPS).
+- **RRF, а не сумма скоров.** Cosine и BM25 в разных шкалах; RRF сливает по рангам, без калибровки и весов.
+- **Reranker только на top-20.** Cross-encoder точнее, но O(N) прогонов модели на запрос; 20 кандидатов —
+  компромисс с бюджетом поиска 300 мс (NFR-4).
+- **Структурированный ответ.** Strict JSON Schema + Pydantic с номерами источников отсекает ссылки на
+  несуществующие чанки; ответ без источников превращается в отказ. Порог score отказ не обеспечивает
+  (score вопросов вне базы пересекается с верными) — это работа промпта.
 - **Синтез по предложениям.** TTS запускается на первом законченном предложении, а не после всего ответа, — это главный рычаг задержки до первого звука.
 - **Инференс вне event loop.** Модели вызываются через executor, поэтому параллельные запросы не блокируют друг друга.
 - **Только инференс.** Модели не обучаются и не дообучаются; качество поднимается поиском, rerank и промптами.

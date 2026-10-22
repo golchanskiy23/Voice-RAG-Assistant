@@ -35,7 +35,7 @@ def test_number_to_words(n: int, words: str) -> None:
         ("Рост на 15%.", "Рост на пятнадцать процентов."),
         ("Ставка 1,5 раза.", "Ставка одна целая пять десятых раза."),
         ("- первый\n- второй", "первый второй"),
-        ("Пишите на security@priboy.example.", "Пишите на адрес в тексте ответа."),
+        ("Пишите на support@example.com.", "Пишите на адрес в тексте ответа."),
     ],
 )
 def test_normalize_for_tts(text: str, spoken: str) -> None:

@@ -33,7 +33,6 @@ from app.services.chunking import Chunker  # noqa: E402
 from app.services.ingestion import EXTENSIONS, IngestionService  # noqa: E402
 from app.services.search import SearchDefaults, SearchMode, SearchService  # noqa: E402
 
-DATA_DIR = API_DIR.parents[1] / "data"
 QUESTIONS = API_DIR / "eval" / "questions.jsonl"
 RESULTS_DIR = API_DIR / "eval" / "results"
 DEFAULT_DATABASE_URL = "postgresql+asyncpg://rag:rag@localhost:5433/rag"
@@ -176,17 +175,25 @@ def migrate(database_url: str) -> None:
     command.upgrade(Config(str(API_DIR / "alembic.ini")), "head")
 
 
+def corpus_files(data_dir: Path) -> list[Path]:
+    return sorted(
+        p
+        for p in data_dir.iterdir()
+        if p.suffix.lower() in EXTENSIONS and p.name not in SKIPPED_FILES
+    )
+
+
 async def index_corpus(
-    database: Database, embedder: Embedder, chunker: Chunker, qdrant: QdrantVectorStore
+    data_dir: Path,
+    database: Database,
+    embedder: Embedder,
+    chunker: Chunker,
+    qdrant: QdrantVectorStore,
 ) -> dict[str, float]:
     async with database.sessionmaker() as session:
         await session.execute(text("TRUNCATE documents CASCADE"))
         await session.commit()
-    files = sorted(
-        p
-        for p in DATA_DIR.iterdir()
-        if p.suffix.lower() in EXTENSIONS and p.name not in SKIPPED_FILES
-    )
+    files = await asyncio.to_thread(corpus_files, data_dir)
     started = time.perf_counter()
     chunks = 0
     for path in files:
@@ -289,7 +296,7 @@ async def evaluate(args: argparse.Namespace, database_url: str) -> list[RunResul
     }
     chunker = Chunker(embedder.count_tokens, settings.chunk_size, settings.chunk_overlap)
     try:
-        indexing = await index_corpus(database, embedder, chunker, qdrant_store)
+        indexing = await index_corpus(args.data_dir, database, embedder, chunker, qdrant_store)
         service = SearchService(
             embedder,
             stores,
@@ -327,6 +334,9 @@ async def evaluate(args: argparse.Namespace, database_url: str) -> list[RunResul
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="recall@1/3/5 и MRR на eval/questions.jsonl")
+    parser.add_argument(
+        "--data-dir", type=Path, required=True, help="папка корпуса (PDF, Markdown)"
+    )
     parser.add_argument("--config", help="имя конфигурации для файла результата")
     parser.add_argument(
         "--mode",
@@ -351,6 +361,8 @@ def parse_args() -> argparse.Namespace:
     unknown = [m for m in args.modes if m not in get_args(SearchMode)]
     if unknown:
         parser.error(f"неизвестный режим: {unknown}")
+    if not args.data_dir.is_dir():
+        parser.error(f"нет папки корпуса: {args.data_dir}")
     if args.config and len(args.modes) > 1:
         parser.error("--config задаётся только для одного режима")
     return args

@@ -28,6 +28,7 @@ def test_ready_when_llm_available(client: TestClient) -> None:
             "llm": True,
             "stt": True,
             "tts": True,
+            "dialog": True,
         },
     }
 
@@ -51,6 +52,7 @@ def test_ready_when_llm_unavailable() -> None:
             "llm": False,
             "stt": True,
             "tts": True,
+            "dialog": True,
         },
     }
 
@@ -94,6 +96,7 @@ def test_ready_treats_timeout_and_errors_as_not_ready(
         "llm": False,
         "stt": True,
         "tts": True,
+        "dialog": True,
     }
 
 
@@ -109,6 +112,7 @@ def test_ready_reports_postgres_unavailable() -> None:
         "llm": True,
         "stt": True,
         "tts": True,
+        "dialog": True,
     }
 
 
@@ -132,6 +136,7 @@ def test_ready_reports_qdrant_unavailable() -> None:
         "llm": True,
         "stt": True,
         "tts": True,
+        "dialog": True,
     }
 
 

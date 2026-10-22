@@ -6,12 +6,15 @@ ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
+ARG WITH_LOCAL_MODELS=0
+
 WORKDIR /app
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --locked --no-dev --no-install-project
+    uv sync --locked --no-dev --no-install-project \
+        $([ "$WITH_LOCAL_MODELS" = "1" ] && echo "--group local-models")
 
 
 FROM python:3.12-slim
