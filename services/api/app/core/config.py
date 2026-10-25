@@ -13,6 +13,7 @@ class DatabaseSettings(BaseSettings):
 
 class Settings(DatabaseSettings):
     llm_provider: Literal["stub"] = "stub"
+    embedder: Literal["hashing"] = "hashing"
     qdrant_url: AnyHttpUrl
     admin_api_key: SecretStr
 

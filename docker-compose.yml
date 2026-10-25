@@ -8,6 +8,7 @@ services:
     image: voice-rag-api:local
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
+      EMBEDDER: ${EMBEDDER:-hashing}
       DATABASE_URL: *database-url
       QDRANT_URL: http://qdrant:6333
       ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}

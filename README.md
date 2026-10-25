@@ -92,7 +92,7 @@ docker compose up -d --build --wait
 
 ```bash
 curl localhost:8000/health    # {"status":"ok"}
-curl localhost:8000/ready     # {"status":"ready","checks":{"postgres":true,"qdrant":true,"llm":true}}
+curl localhost:8000/ready     # {"status":"ready","checks":{"postgres":true,"qdrant":true,"embedder":true,"llm":true}}
 ```
 
 - OpenAPI-документация — http://localhost:8000/docs
@@ -110,7 +110,7 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | Метод | Путь | Назначение | Статус |
 |-------|------|------------|--------|
 | GET | `/health` | Процесс жив | ✅ |
-| GET | `/ready` | Postgres, Qdrant и LLM доступны, иначе 503 | ✅ |
+| GET | `/ready` | Postgres, Qdrant, эмбеддер и LLM доступны, иначе 503 | ✅ |
 | POST | `/documents` | Загрузить PDF/Markdown до 20 МБ, API-ключ в `X-API-Key`; повторный файл → тот же `id` | ✅ без индексации |
 | POST | `/ask` | Ответ целиком: `{answer, sources, confidence, latency}` | ✅ заглушка LLM |
 | POST | `/ask/stream` | SSE: `token`, `sources`, `done`, `error` | ✅ заглушка LLM |
@@ -131,6 +131,7 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 |------------|------------------------|------------|
 | `ADMIN_API_KEY` | `dev-admin-key` | Ключ для `/documents` |
 | `LLM_PROVIDER` | `stub` | Реализация LLM (пока только заглушка) |
+| `EMBEDDER` | `hashing` | Эмбеддер; `hashing` — feature hashing без модели, для разработки до подключения e5/BGE-M3 |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | `rag` | Учётные данные Postgres |
 | `API_PORT` | `8000` | Порт api на хосте |
 | `POSTGRES_PORT`, `QDRANT_PORT` | `5433`, `6334` | Порты Postgres и Qdrant на `127.0.0.1` |
