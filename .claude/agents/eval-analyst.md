@@ -9,7 +9,7 @@ tools: Read, Grep, Glob, Bash
 Данные:
 - `services/api/eval/questions.jsonl` — вопросы, эталонные чанки/документы, тип вопроса, вопросы вне базы;
 - `services/api/eval/results/<дата>_<конфиг>.json` — результаты прогонов;
-- цели — NFR-1…NFR-4 в `docs/spec.org`.
+- цели — NFR-1…NFR-4 в `docs/spec.md`.
 
 Задачи:
 1. Сравни конфигурации таблицей было/стало (recall@1/3/5, MRR; или p50/p95 по этапам).

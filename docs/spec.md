@@ -1,12 +1,15 @@
-#+title: Голосовой RAG-ассистент — ТЗ
+# Голосовой RAG-ассистент — ТЗ
 
-* ТЗ: голосовой RAG-ассистент
-** 1. Назначение
+## 1. Назначение
+
 Ассистент отвечает на вопросы по корпусу документов (PDF, Markdown) текстом и голосом, со ссылкой на источник.
+
 Цель проекта для меня: портфолио AI-инженера с измеренным качеством поиска (recall@5) и задержкой голосового ответа (p95).
+
 Каналы: REST API, WebSocket (голос в реальном времени), Telegram-бот.
 
-** 2. Пользователи и сценарии
+## 2. Пользователи и сценарии
+
 - С1. Пользователь пишет вопрос в Telegram → получает текстовый ответ со ссылками [файл, страница].
 - С2. Пользователь отправляет голосовое в Telegram → получает голосовой и текстовый ответ.
 - С3. Пользователь говорит в микрофон через веб/CLI-клиент → слышит ответ, звук начинается до окончания генерации.
@@ -15,8 +18,10 @@
 - С6. Администратор загружает документ через API → через минуту по нему можно задавать вопросы.
 - С7. Разработчик одной командой прогоняет eval и получает метрики поиска и латентности.
 
-** 3. Границы проекта
+## 3. Границы проекта
+
 Входит: индексация документов, гибридный поиск, генерация ответа, STT, TTS, Telegram, деплой на VPS, eval.
+
 Не входит:
 - обучение и дообучение моделей (только инференс готовых);
 - LangChain, LlamaIndex и похожие фреймворки — весь RAG пишется руками;
@@ -24,89 +29,102 @@
 - OCR сканов (PDF только с текстовым слоем);
 - телефония (Asterisk) — опционально, вне основного объёма.
 
-** 4. Функциональные требования
-*** FR-1. Загрузка и индексация документов
-- FR-1.1. =POST /documents= принимает PDF и Markdown до 20 МБ; другие форматы → 415.
+## 4. Функциональные требования
+
+### FR-1. Загрузка и индексация документов
+
+- FR-1.1. `POST /documents` принимает PDF и Markdown до 20 МБ; другие форматы → 415.
 - FR-1.2. Текст извлекается с сохранением номера страницы (PDF) и заголовка раздела (MD); колонтитулы и номера страниц вычищаются.
 - FR-1.3. Чанкинг: рекурсивный по структуре, размер и перекрытие в токенах, задаются в конфиге (по умолчанию определяется экспериментом в 103).
-- FR-1.4. Для каждого чанка сохраняются: =doc_id=, текст, страница, раздел, позиция, хеш, эмбеддинг.
+- FR-1.4. Для каждого чанка сохраняются: `doc_id`, текст, страница, раздел, позиция, хеш, эмбеддинг.
 - FR-1.5. Повторная загрузка того же файла (по SHA-256) не создаёт дубликатов; новая версия файла заменяет старые чанки.
-- FR-1.6. =DELETE /documents/{id}= удаляет документ и его чанки из обоих хранилищ.
-- FR-1.7. CLI =scripts/index.py <dir>= индексирует папку целиком.
+- FR-1.6. `DELETE /documents/{id}` удаляет документ и его чанки из обоих хранилищ.
+- FR-1.7. CLI `scripts/index.py <dir>` индексирует папку целиком.
 
-*** FR-2. Поиск
-- FR-2.1. Векторный поиск top-k в Qdrant и в pgvector; хранилище выбирается конфигом (=VECTOR_STORE=qdrant|pgvector=).
-- FR-2.2. Полнотекстовый поиск BM25 (Postgres =tsvector=, словарь russian).
+### FR-2. Поиск
+
+- FR-2.1. Векторный поиск top-k в Qdrant и в pgvector; хранилище выбирается конфигом (`VECTOR_STORE=qdrant|pgvector`).
+- FR-2.2. Полнотекстовый поиск BM25 (Postgres `tsvector`, словарь russian).
 - FR-2.3. Гибрид: слияние векторного и BM25 через RRF.
 - FR-2.4. Reranker (cross-encoder) переранжирует top-N (по умолчанию 20) → top-k (по умолчанию 5); отключается конфигом.
-- FR-2.5. Фильтр по документу (=doc_ids=) в запросе.
+- FR-2.5. Фильтр по документу (`doc_ids`) в запросе.
 - FR-2.6. Эмбеддер — за интерфейсом; реализации: OpenAI, multilingual-e5, BGE-M3 (локально, PyTorch).
-- FR-2.7. =POST /search= возвращает чанки со score, метаданными и этапом, на котором они найдены (vector/bm25).
+- FR-2.7. `POST /search` возвращает чанки со score, метаданными и этапом, на котором они найдены (vector/bm25).
 
-*** FR-3. Генерация ответа
+### FR-3. Генерация ответа
+
 - FR-3.1. LLM-клиент за интерфейсом; реализации: OpenAI и GigaChat; выбор конфигом, fallback на второго провайдера при ошибке.
 - FR-3.2. Ответ строится только по найденным чанкам; чанки передаются пронумерованными.
-- FR-3.3. Ответ валидируется Pydantic-схемой: =answer=, =sources= (номера чанков), =confidence=; номера вне контекста → ошибка валидации.
+- FR-3.3. Ответ валидируется Pydantic-схемой: `answer`, `sources` (номера чанков), `confidence`; номера вне контекста → ошибка валидации.
 - FR-3.4. При невалидном ответе — один повтор с текстом ошибки, затем ответ-заглушка.
 - FR-3.5. Если релевантных чанков нет (score ниже порога) или модель не нашла ответа → «В документах нет ответа на этот вопрос».
-- FR-3.6. =POST /ask= — ответ целиком; =POST /ask/stream= — SSE со стримингом токенов и финальным событием со списком источников.
+- FR-3.6. `POST /ask` — ответ целиком; `POST /ask/stream` — SSE со стримингом токенов и финальным событием со списком источников.
 - FR-3.7. Источник в ответе: имя файла + страница/раздел + цитата (до 200 символов).
 - FR-3.8. Промпты хранятся в отдельных файлах с версией; версия промпта пишется в лог каждого запроса.
 
-*** FR-4. Диалог
-- FR-4.1. История хранится в Redis по =session_id= / =chat_id=, TTL 24 ч, не больше N последних сообщений.
-- FR-4.2. Перед поиском уточняющий вопрос переформулируется LLM в самостоятельный (query rewriting) с учётом истории.
-- FR-4.3. Команда =/reset= в боте очищает историю.
+### FR-4. Диалог
 
-*** FR-5. Голос
+- FR-4.1. История хранится в Redis по `session_id` / `chat_id`, TTL 24 ч, не больше N последних сообщений.
+- FR-4.2. Перед поиском уточняющий вопрос переформулируется LLM в самостоятельный (query rewriting) с учётом истории.
+- FR-4.3. Команда `/reset` в боте очищает историю.
+
+### FR-5. Голос
+
 - FR-5.1. STT: faster-whisper, язык ru; вход — PCM 16 кГц mono, ogg/opus (Telegram), wav; конвертация через ffmpeg.
 - FR-5.2. VAD определяет конец фразы; после него текст сразу уходит в RAG.
-- FR-5.3. WebSocket =/ws/voice=: клиент шлёт аудио-чанки, сервер шлёт события =partial_transcript=, =final_transcript=, =answer_text=, =audio_chunk=, =done=.
+- FR-5.3. WebSocket `/ws/voice`: клиент шлёт аудио-чанки, сервер шлёт события `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `done`.
 - FR-5.4. TTS: Silero (ru), синтез по предложениям по мере генерации LLM.
-- FR-5.5. Текст перед TTS нормализуется: числа словами, без markdown и ссылок =[n]=.
+- FR-5.5. Текст перед TTS нормализуется: числа словами, без markdown и ссылок `[n]`.
 - FR-5.6. Barge-in: если пользователь заговорил во время ответа — генерация и синтез отменяются.
 
-*** FR-6. Telegram-бот
-- FR-6.1. Работа через webhook (не polling), проверка =X-Telegram-Bot-Api-Secret-Token=.
-- FR-6.2. Текстовое сообщение → текстовый ответ с источниками; голосовое → текст + голос (=sendVoice=).
-- FR-6.3. Дедупликация update по =update_id= (Redis, TTL 1 ч).
-- FR-6.4. Rate limit: не больше 10 запросов в минуту на пользователя; доступ по whitelist =chat_id= (конфиг).
+### FR-6. Telegram-бот
+
+- FR-6.1. Работа через webhook (не polling), проверка `X-Telegram-Bot-Api-Secret-Token`.
+- FR-6.2. Текстовое сообщение → текстовый ответ с источниками; голосовое → текст + голос (`sendVoice`).
+- FR-6.3. Дедупликация update по `update_id` (Redis, TTL 1 ч).
+- FR-6.4. Rate limit: не больше 10 запросов в минуту на пользователя; доступ по whitelist `chat_id` (конфиг).
 - FR-6.5. Индикатор «печатает…» / «записывает голосовое…» во время обработки.
 
-*** FR-7. Оценка качества
-- FR-7.1. Датасет =eval/questions.jsonl=: 50 вопросов, эталонные чанки/документы, эталонный ответ, тип вопроса; не меньше 5 вопросов вне базы.
-- FR-7.2. =scripts/eval_retrieval.py= считает recall@1/3/5 и MRR для заданной конфигурации.
-- FR-7.3. =scripts/eval_latency.py= прогоняет ≥50 голосовых запросов и считает p50/p95 по этапам.
-- FR-7.4. Результаты сохраняются в =eval/results/<дата>_<конфиг>.json= — для таблиц было/стало.
+### FR-7. Оценка качества
+
+- FR-7.1. Датасет `eval/questions.jsonl`: 50 вопросов, эталонные чанки/документы, эталонный ответ, тип вопроса; не меньше 5 вопросов вне базы.
+- FR-7.2. `scripts/eval_retrieval.py` считает recall@1/3/5 и MRR для заданной конфигурации.
+- FR-7.3. `scripts/eval_latency.py` прогоняет ≥50 голосовых запросов и считает p50/p95 по этапам.
+- FR-7.4. Результаты сохраняются в `eval/results/<дата>_<конфиг>.json` — для таблиц было/стало.
 - FR-7.5. Регрессионные тесты промптов в pytest: формат ответа, наличие источника, отказ на вопросы вне базы.
 
-*** FR-8. Служебное
-- FR-8.1. =GET /health= — живость; =GET /ready= — доступность Postgres, Qdrant, Redis, LLM.
-- FR-8.2. OpenAPI-документация FastAPI (=/docs=).
-- FR-8.3. Админские эндпоинты (=/documents=) защищены API-ключом из env.
+### FR-8. Служебное
 
-** 5. Нефункциональные требования
+- FR-8.1. `GET /health` — живость; `GET /ready` — доступность Postgres, Qdrant, Redis, LLM.
+- FR-8.2. OpenAPI-документация FastAPI (`/docs`).
+- FR-8.3. Админские эндпоинты (`/documents`) защищены API-ключом из env.
+
+## 5. Нефункциональные требования
+
 | ID    | Требование                                    | Целевое значение                       | Как проверяю           |
-|-------+-----------------------------------------------+----------------------------------------+------------------------|
+|-------|-----------------------------------------------|----------------------------------------|------------------------|
 | NFR-1 | Качество поиска, лучшая конфигурация          | recall@5 ≥ 0.85, прирост к baseline    | eval_retrieval.py      |
 | NFR-2 | Задержка до первого звука (голос)             | p95 ≤ 2.5 с (VPS, CPU)                 | eval_latency.py        |
-| NFR-3 | Задержка до первого токена (текст, =/ask/stream=) | p95 ≤ 1.5 с                        | eval_latency.py        |
+| NFR-3 | Задержка до первого токена (текст, `/ask/stream`) | p95 ≤ 1.5 с                        | eval_latency.py        |
 | NFR-4 | Поиск (retrieve + rerank)                     | p95 ≤ 300 мс                           | логи, eval             |
 | NFR-5 | Галлюцинации на вопросах вне базы             | 0 из 5+ отвечены выдумкой              | регрессионные тесты    |
 | NFR-6 | Распознавание речи                            | WER ≤ 15% на своих записях             | 20 записей             |
 | NFR-7 | Индексация                                    | 100 страниц PDF ≤ 2 мин                | замер                  |
-| NFR-8 | Память на VPS                                 | всё вместе ≤ 4 ГБ RAM                  | =docker stats=         |
+| NFR-8 | Память на VPS                                 | всё вместе ≤ 4 ГБ RAM                  | `docker stats`         |
 | NFR-9 | Доступность                                   | автоподъём после перезагрузки VPS      | ручная проверка        |
+
 Цифры — ориентиры; если не достигаю, в README пишу реальное значение и причину.
+
 Прочее:
-- Секреты только в env, =.env= в =.gitignore=, есть =.env.example=.
-- Логи — структурированный JSON: =request_id=, этап, длительность, токены, провайдер, версия промпта; без текста персональных данных в INFO.
-- Типизация: mypy/pyright без ошибок на =app/=; линтер ruff; pre-commit.
-- Тесты: unit на чанкинг, RRF, валидацию ответа; интеграционные на =/ask= с замоканным LLM. Покрытие ключевых модулей ≥ 60%.
+- Секреты только в env, `.env` в `.gitignore`, есть `.env.example`.
+- Логи — структурированный JSON: `request_id`, этап, длительность, токены, провайдер, версия промпта; без текста персональных данных в INFO.
+- Типизация: mypy/pyright без ошибок на `app/`; линтер ruff; pre-commit.
+- Тесты: unit на чанкинг, RRF, валидацию ответа; интеграционные на `/ask` с замоканным LLM. Покрытие ключевых модулей ≥ 60%.
 - Блокирующие вызовы (инференс моделей) — в executor, event loop не блокируется.
 
-** 6. Архитектура
-#+begin_example
+## 6. Архитектура
+
+```
  Telegram ──webhook──┐        Веб/CLI-клиент ──WebSocket──┐
                      ▼                                     ▼
               ┌──────────────────── FastAPI (api) ───────────────────┐
@@ -125,72 +143,89 @@
                  │            │             │            │
              PostgreSQL     Qdrant        Redis      внешние LLM API
              (+pgvector)
-#+end_example
+```
+
 Структура репозитория:
-- =frontend/= — веб-клиент для голоса (сценарий С3);
-- =services/api/= — backend-сервис FastAPI (структура ниже);
-- =contracts/= — согласованные API: OpenAPI-схема, события WebSocket (FR-5.3), примеры ответов;
-- =docs/= — ТЗ и общая документация;
-- =data/= — подготовленные демо-документы;
-- =.agents/skills/= — навыки агентов с областью применения;
-- в корне: =AGENTS.md=, =README.md=, =docker-compose.yml=, =.env.example=.
-Структура =services/api/= (пути к скриптам и eval в ТЗ — относительно неё):
-- =app/api/= — роутеры, схемы запросов/ответов;
-- =app/services/= — rag, dialog, voice, ingestion;
-- =app/adapters/= — embedders, vector_stores, llm, stt, tts (каждый — Protocol + реализации);
-- =app/core/= — конфиг (pydantic-settings), логирование, ошибки;
-- =prompts/= — шаблоны промптов; =scripts/= — index, eval; =eval/= — датасет и результаты; =tests/=.
+- `frontend/` — веб-клиент для голоса (сценарий С3);
+- `services/api/` — backend-сервис FastAPI (структура ниже);
+- `contracts/` — согласованные API: OpenAPI-схема, события WebSocket (FR-5.3), примеры ответов;
+- `docs/` — ТЗ и общая документация;
+- `data/` — подготовленные демо-документы;
+- `.agents/skills/` — навыки агентов с областью применения;
+- в корне: `AGENTS.md`, `README.md`, `docker-compose.yml`, `.env.example`.
 
-** 7. Данные
+Структура `services/api/` (пути к скриптам и eval в ТЗ — относительно неё):
+- `app/api/` — роутеры, схемы запросов/ответов;
+- `app/services/` — rag, dialog, voice, ingestion;
+- `app/adapters/` — embedders, vector_stores, llm, stt, tts (каждый — Protocol + реализации);
+- `app/core/` — конфиг (pydantic-settings), логирование, ошибки;
+- `prompts/` — шаблоны промптов; `scripts/` — index, eval; `eval/` — датасет и результаты; `tests/`.
+
+## 7. Данные
+
 PostgreSQL:
-- =documents=: =id uuid=, =filename=, =sha256 unique=, =mime=, =pages int=, =created_at=.
-- =chunks=: =id uuid=, =document_id fk on delete cascade=, =ord int=, =text=, =page int=, =section text=, =tokens int=, =embedding vector(N)=, =tsv tsvector= (generated), =metadata jsonb=.
-- Индексы: HNSW на =embedding= (cosine), GIN на =tsv=, btree на =document_id=.
-- =query_log=: =request_id=, =question=, =rewritten=, =chunk_ids=, =latency_ms jsonb=, =tokens=, =provider=, =prompt_version=, =created_at=.
-Qdrant: коллекция =chunks_<embedder>=, id = id чанка, payload: =document_id=, =page=, =section=, =text=.
-Redis: =dialog:{chat_id}= (list, TTL 24 ч), =tg:update:{id}= (дедуп, TTL 1 ч), =rl:{chat_id}= (rate limit), =emb:{sha}= (кэш эмбеддингов запросов).
+- `documents`: `id uuid`, `filename`, `sha256 unique`, `mime`, `pages int`, `created_at`.
+- `chunks`: `id uuid`, `document_id fk on delete cascade`, `ord int`, `text`, `page int`, `section text`, `tokens int`, `embedding vector(N)`, `tsv tsvector` (generated), `metadata jsonb`.
+- Индексы: HNSW на `embedding` (cosine), GIN на `tsv`, btree на `document_id`.
+- `query_log`: `request_id`, `question`, `rewritten`, `chunk_ids`, `latency_ms jsonb`, `tokens`, `provider`, `prompt_version`, `created_at`.
 
-** 8. API (кратко)
+Qdrant: коллекция `chunks_<embedder>`, id = id чанка, payload: `document_id`, `page`, `section`, `text`.
+
+Redis: `dialog:{chat_id}` (list, TTL 24 ч), `tg:update:{id}` (дедуп, TTL 1 ч), `rl:{chat_id}` (rate limit), `emb:{sha}` (кэш эмбеддингов запросов).
+
+## 8. API (кратко)
+
 | Метод  | Путь              | Вход                                     | Выход                                    |
-|--------+-------------------+------------------------------------------+------------------------------------------|
-| POST   | /documents        | multipart file                           | ={id, chunks, status}=                   |
+|--------|-------------------|------------------------------------------|------------------------------------------|
+| POST   | /documents        | multipart file                           | `{id, chunks, status}`                   |
 | DELETE | /documents/{id}   | —                                        | 204                                      |
 | GET    | /documents        | —                                        | список документов                        |
-| POST   | /search           | ={query, k, doc_ids?, mode}=             | ={chunks: [{id, text, score, source}]}=  |
-| POST   | /ask              | ={question, session_id?}=                | ={answer, sources, confidence, latency}= |
-| POST   | /ask/stream       | то же                                    | SSE: =token=, =sources=, =done=          |
+| POST   | /search           | `{query, k, doc_ids?, mode}`             | `{chunks: [{id, text, score, source}]}`  |
+| POST   | /ask              | `{question, session_id?}`                | `{answer, sources, confidence, latency}` |
+| POST   | /ask/stream       | то же                                    | SSE: `token`, `sources`, `done`          |
 | WS     | /ws/voice         | бинарные аудио-чанки                     | события FR-5.3                           |
 | POST   | /telegram/webhook | Update                                   | 200                                      |
 | GET    | /health, /ready   | —                                        | статус                                   |
-Ошибки — единый формат ={error: {code, message, request_id}}=.
 
-** 9. Конфигурация (env)
-=LLM_PROVIDER=, =LLM_FALLBACK=, =OPENAI_API_KEY=, =GIGACHAT_CREDENTIALS=, =EMBEDDER=, =VECTOR_STORE=, =CHUNK_SIZE=, =CHUNK_OVERLAP=,
-=RETRIEVE_TOP_N=, =TOP_K=, =RERANK_ENABLED=, =SCORE_THRESHOLD=, =WHISPER_MODEL=, =WHISPER_COMPUTE_TYPE=, =TTS_SPEAKER=,
-=DATABASE_URL=, =QDRANT_URL=, =REDIS_URL=, =TELEGRAM_TOKEN=, =TELEGRAM_SECRET=, =TELEGRAM_WHITELIST=, =ADMIN_API_KEY=, =LOG_LEVEL=.
+Ошибки — единый формат `{error: {code, message, request_id}}`.
 
-** 10. Стек
+## 9. Конфигурация (env)
+
+`LLM_PROVIDER`, `LLM_FALLBACK`, `OPENAI_API_KEY`, `GIGACHAT_CREDENTIALS`, `EMBEDDER`, `VECTOR_STORE`, `CHUNK_SIZE`, `CHUNK_OVERLAP`,
+
+`RETRIEVE_TOP_N`, `TOP_K`, `RERANK_ENABLED`, `SCORE_THRESHOLD`, `WHISPER_MODEL`, `WHISPER_COMPUTE_TYPE`, `TTS_SPEAKER`,
+
+`DATABASE_URL`, `QDRANT_URL`, `REDIS_URL`, `TELEGRAM_TOKEN`, `TELEGRAM_SECRET`, `TELEGRAM_WHITELIST`, `ADMIN_API_KEY`, `LOG_LEVEL`.
+
+## 10. Стек
+
 Python 3.12, FastAPI, Pydantic v2 + pydantic-settings, asyncpg/SQLAlchemy, qdrant-client, pgvector, redis-py (async),
+
 OpenAI SDK, GigaChat SDK, transformers + PyTorch, bge-reranker, faster-whisper, silero-vad, Silero TTS, ffmpeg, aiogram 3,
+
 tiktoken, pymupdf, structlog, pytest, ruff, mypy, Docker Compose, Caddy, VPS (Linux).
 
-** 11. Этапы и критерии приёмки
+## 11. Этапы и критерии приёмки
+
 | Этап             | Требования                    | Приёмка                                                                    |
-|------------------+-------------------------------+----------------------------------------------------------------------------|
-| 1. Текстовый RAG | FR-1, FR-2.1, FR-3, FR-8      | =docker compose up=; загрузил PDF → =/ask= отвечает со ссылкой; отказ вне базы |
+|------------------|-------------------------------|----------------------------------------------------------------------------|
+| 1. Текстовый RAG | FR-1, FR-2.1, FR-3, FR-8      | `docker compose up`; загрузил PDF → `/ask` отвечает со ссылкой; отказ вне базы |
 | 2. Оценка        | FR-2.2–2.6, FR-7.1–7.2, FR-7.5 | таблица recall@5/MRR: baseline → hybrid → +rerank; 3 эмбеддера          |
 | 3. Голос         | FR-5, FR-7.3                  | голос → голос через WebSocket; p50/p95 по этапам до/после оптимизации      |
 | 4. Канал, деплой | FR-4, FR-6, NFR-8, NFR-9      | бот на VPS по HTTPS отвечает на текст и голос; README с цифрами            |
+
 Проект считается готовым для резюме после этапа 2 (если собес раньше 22.11) или после этапа 4.
 
-** 12. Риски
+## 12. Риски
+
 - Мало RAM на VPS для whisper + reranker + e5 → модели меньше (whisper small int8, e5-base), reranker только на top-20, или STT через API как fallback.
 - Задержка LLM API нестабильна → стриминг, короткий промпт, fallback-провайдер, замер p95 честно с этим учётом.
 - Eval-датасет, сгенерированный LLM, завышает метрики → каждый вопрос проверяю руками, часть пишу сам.
 - Плохой текст из PDF (таблицы, колонки) → тест парсера на реальных документах, такие документы помечаю в README.
 - Блокировка event loop инференсом → executor, замер латентности под параллельной нагрузкой (5–10 запросов).
 
-** 13. Результат (артефакты)
+## 13. Результат (артефакты)
+
 - Публичный репозиторий с README: описание, схема, запуск одной командой, демо-видео, таблицы метрик, раздел «Решения».
 - Работающий Telegram-бот (ссылка в README).
-- Файлы результатов eval в =eval/results/= — источник цифр для README.
+- Файлы результатов eval в `eval/results/` — источник цифр для README.
