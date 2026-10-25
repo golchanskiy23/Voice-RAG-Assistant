@@ -85,7 +85,8 @@ tests/
 docker compose up -d --build --wait  # из корня: postgres, qdrant, миграции (migrate), api
 docker compose run --rm migrate alembic downgrade -1   # откат последней миграции
 cd services/api                      # остальные команды — отсюда
-uv run pytest                        # тесты
+uv run pytest                        # unit-тесты
+uv run pytest -m integration         # интеграционные: Postgres и Qdrant в testcontainers, нужен Docker
 uv run ruff check . && uv run ruff format --check .
 uv run mypy app tests migrations
 DATABASE_URL=postgresql+asyncpg://rag:rag@localhost:5433/rag uv run alembic upgrade head
