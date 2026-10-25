@@ -39,6 +39,7 @@ def test_ready_with_real_dependencies(settings: Settings) -> None:
         "llm": True,
         "stt": True,
         "tts": True,
+        "dialog": True,
     }
 
 

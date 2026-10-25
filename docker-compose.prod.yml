@@ -1,0 +1,72 @@
+# Продакшен-оверлей: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build --wait
+# Секреты и настройки — в .env рядом (см. .env.example и docs/deploy.md).
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  api:
+    build:
+      context: ./services/api
+      args:
+        WITH_LOCAL_MODELS: ${WITH_LOCAL_MODELS:-0}
+    ports: !reset []
+    environment:
+      TELEGRAM_WEBHOOK_URL: https://${DOMAIN}/telegram/webhook
+      HF_HOME: /models/hf
+      TORCH_HOME: /models/torch
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      - models:/models
+    mem_limit: ${API_MEMORY:-2560m}
+    restart: always
+    logging: *logging
+
+  migrate:
+    logging: *logging
+
+  postgres:
+    ports: !reset []
+    mem_limit: 512m
+    restart: always
+    logging: *logging
+
+  qdrant:
+    ports: !reset []
+    mem_limit: 512m
+    restart: always
+    logging: *logging
+
+  redis:
+    ports: !reset []
+    mem_limit: 128m
+    restart: always
+    logging: *logging
+
+  caddy:
+    image: caddy:2.10-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN:?нужен DOMAIN в .env}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    mem_limit: 64m
+    restart: always
+    logging: *logging
+
+volumes:
+  models:
+  caddy-data:
+  caddy-config:

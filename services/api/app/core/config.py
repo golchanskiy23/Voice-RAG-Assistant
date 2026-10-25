@@ -52,6 +52,16 @@ class Settings(DatabaseSettings):
     stub_llm_token_delay: float = Field(default=0.0, ge=0)
     stub_tts_realtime_factor: float = Field(default=0.0, ge=0)
     max_utterance_seconds: float = Field(default=30.0, gt=0)
+    redis_url: str | None = None
+    dialog_max_turns: int = Field(default=10, ge=2, le=100)
+    dialog_ttl_seconds: int = Field(default=86_400, gt=0)
+    rewrite_enabled: bool = True
+    telegram_token: SecretStr | None = None
+    telegram_secret: SecretStr | None = None
+    telegram_webhook_url: str | None = None
+    telegram_whitelist: str = ""
+    telegram_rate_limit: int = Field(default=10, ge=1)
+    telegram_max_voice_seconds: int = Field(default=60, gt=0)
     embedder: Literal["hashing", "openai", "e5", "bge-m3"] = "hashing"
     embedder_device: str = "cpu"
     openai_api_key: SecretStr | None = None
@@ -71,7 +81,14 @@ class Settings(DatabaseSettings):
     chunk_overlap: int = Field(default=45, ge=0)
 
     @field_validator(
-        "llm_fallback", "gigachat_credentials", "gigachat_ca_bundle_file", mode="before"
+        "llm_fallback",
+        "gigachat_credentials",
+        "gigachat_ca_bundle_file",
+        "redis_url",
+        "telegram_token",
+        "telegram_secret",
+        "telegram_webhook_url",
+        mode="before",
     )
     @classmethod
     def empty_as_none(cls, value: object) -> object:
@@ -101,6 +118,16 @@ class Settings(DatabaseSettings):
         if self.llm_fallback == self.llm_provider:
             raise ValueError("LLM_FALLBACK должен отличаться от LLM_PROVIDER")
         return self
+
+    @model_validator(mode="after")
+    def telegram_requires_secret(self) -> Self:
+        if self.telegram_token is not None and self.telegram_secret is None:
+            raise ValueError("для TELEGRAM_TOKEN нужен TELEGRAM_SECRET (проверка вебхука)")
+        return self
+
+    @property
+    def telegram_chat_whitelist(self) -> frozenset[int]:
+        return frozenset(int(x) for x in self.telegram_whitelist.replace(" ", "").split(",") if x)
 
     @property
     def llm_providers(self) -> set[LLMProvider]:
