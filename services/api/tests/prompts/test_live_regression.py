@@ -17,10 +17,12 @@ from app.services.rag import RAGService, RAGSettings
 from tests.factories import count_words, make_settings
 from tests.llm_fakes import hit, make_search
 
-pytestmark = pytest.mark.llm
-
 API_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = API_DIR.parents[1] / "data"
+pytestmark = [
+    pytest.mark.llm,
+    pytest.mark.skipif(not DATA_DIR.is_dir(), reason="нет корпуса data/ под eval/questions.jsonl"),
+]
 QUESTIONS = [
     json.loads(line)
     for line in (API_DIR / "eval" / "questions.jsonl").read_text(encoding="utf-8").splitlines()

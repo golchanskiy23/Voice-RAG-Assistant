@@ -1,0 +1,19 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	@internal path /ready /docs /openapi.json
+	respond @internal 404
+
+	reverse_proxy api:8000 {
+		flush_interval -1
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

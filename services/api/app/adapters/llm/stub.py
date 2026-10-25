@@ -31,6 +31,14 @@ def extractive_answer(request: LLMRequest) -> str:
     return json.dumps(answer, ensure_ascii=False)
 
 
+def echo_question(request: LLMRequest) -> str:
+    user = request.messages[-1].content
+    question = user.rsplit("Вопрос: ", 1)[-1].strip()
+    previous = re.findall(r"^Пользователь: (.+)$", user, re.M)
+    combined = f"{previous[-1]} {question}" if previous else question
+    return json.dumps({"question": combined}, ensure_ascii=False)
+
+
 class StubLLMClient:
     def __init__(self, token_delay: float = 0.0) -> None:
         self._token_delay = token_delay
@@ -41,6 +49,8 @@ class StubLLMClient:
         return "stub"
 
     async def complete(self, request: LLMRequest) -> Completion:
+        if request.json_schema is not None and request.json_schema.name == "rewritten_question":
+            return Completion(text=echo_question(request), provider=self.name)
         return Completion(text=extractive_answer(request), provider=self.name)
 
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:

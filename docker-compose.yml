@@ -47,6 +47,11 @@ services:
       CHUNK_OVERLAP: ${CHUNK_OVERLAP:-45}
       DATABASE_URL: *database-url
       QDRANT_URL: http://qdrant:6333
+      REDIS_URL: redis://redis:6379/0
+      TELEGRAM_TOKEN:
+      TELEGRAM_SECRET:
+      TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
+      TELEGRAM_WHITELIST: ${TELEGRAM_WHITELIST:-}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
     ports:
       - "${API_PORT:-8000}:8000"
@@ -54,6 +59,8 @@ services:
       migrate:
         condition: service_completed_successfully
       qdrant:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     restart: unless-stopped
 
@@ -102,6 +109,21 @@ services:
       retries: 10
     restart: unless-stopped
 
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "64mb", "--maxmemory-policy", "volatile-lru"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   qdrant-data:
+  redis-data:

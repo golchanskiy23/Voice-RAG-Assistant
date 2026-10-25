@@ -14,6 +14,7 @@ from app.core.database import Database
 from app.repositories.documents import DocumentRepository, SqlDocumentRepository
 from app.repositories.fulltext import KeywordIndex
 from app.services.chunking import Chunker
+from app.services.dialog import DialogService, NoRewrite, QueryRewriter
 from app.services.ingestion import IngestionService
 from app.services.prompts import AnswerPrompt
 from app.services.rag import RAGService, RAGSettings
@@ -165,6 +166,16 @@ def rag_service_from_state(state: Any) -> RAGService:
     )
 
 
+def dialog_service_from_state(state: Any) -> DialogService:
+    settings: Settings = state.settings
+    rewriter = QueryRewriter(state.llm, state.rewrite_prompt) if settings.rewrite_enabled else None
+    return DialogService(state.dialog_store, rewriter or NoRewrite(), rag_service_from_state(state))
+
+
+def get_dialog_service(request: Request) -> DialogService:
+    return dialog_service_from_state(request.app.state)
+
+
 SettingsDep = Annotated[Settings, Depends(get_settings_dep)]
 LLMDep = Annotated[LLMClient, Depends(get_llm)]
 EmbedderDep = Annotated[Embedder, Depends(get_embedder)]
@@ -172,3 +183,4 @@ ResourcesDep = Annotated[dict[str, Resource], Depends(get_resources)]
 RAGServiceDep = Annotated[RAGService, Depends(get_rag_service)]
 IngestionServiceDep = Annotated[IngestionService, Depends(get_ingestion_service)]
 SearchServiceDep = Annotated[SearchService, Depends(get_search_service)]
+DialogServiceDep = Annotated[DialogService, Depends(get_dialog_service)]
