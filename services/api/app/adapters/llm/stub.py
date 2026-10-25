@@ -2,7 +2,7 @@ import asyncio
 import re
 from collections.abc import AsyncIterator
 
-NO_ANSWER = "В документах нет ответа на этот вопрос."
+from app.services.llm_answer import NO_ANSWER, LLMAnswer
 
 
 class StubLLMClient:
@@ -15,7 +15,7 @@ class StubLLMClient:
         return "stub"
 
     async def complete(self, prompt: str) -> str:
-        return NO_ANSWER
+        return LLMAnswer(answer=NO_ANSWER, confidence=0.0).model_dump_json()
 
     async def stream(self, prompt: str) -> AsyncIterator[str]:
         for token in re.findall(r"\S+\s*", NO_ANSWER):

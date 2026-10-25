@@ -1,7 +1,8 @@
 from fastapi.testclient import TestClient
 
-from app.adapters.llm.stub import NO_ANSWER, StubLLMClient
+from app.adapters.llm.stub import StubLLMClient
 from app.main import create_app
+from app.services.llm_answer import NO_ANSWER, LLMAnswer
 
 
 def test_ask_returns_stub_answer(client: TestClient) -> None:
@@ -17,14 +18,16 @@ def test_ask_returns_stub_answer(client: TestClient) -> None:
 
 class EchoLLM(StubLLMClient):
     async def complete(self, prompt: str) -> str:
-        return f"echo: {prompt}"
+        return LLMAnswer(answer=f"echo: {prompt}", confidence=0.5).model_dump_json()
 
 
 def test_ask_uses_llm_from_lifespan() -> None:
     with TestClient(create_app(llm_factory=EchoLLM)) as client:
         response = client.post("/ask", json={"question": "привет"})
 
-    assert response.json()["answer"] == "echo: привет"
+    body = response.json()
+    assert body["answer"] == "echo: привет"
+    assert body["confidence"] == 0.5
 
 
 def test_ask_rejects_empty_question(client: TestClient) -> None:
