@@ -126,7 +126,15 @@
              PostgreSQL     Qdrant        Redis      внешние LLM API
              (+pgvector)
 #+end_example
-Структура кода:
+Структура репозитория:
+- =frontend/= — веб-клиент для голоса (сценарий С3);
+- =services/api/= — backend-сервис FastAPI (структура ниже);
+- =contracts/= — согласованные API: OpenAPI-схема, события WebSocket (FR-5.3), примеры ответов;
+- =docs/= — ТЗ и общая документация;
+- =data/= — подготовленные демо-документы;
+- =.agents/skills/= — навыки агентов с областью применения;
+- в корне: =AGENTS.md=, =README.md=, =docker-compose.yml=, =.env.example=.
+Структура =services/api/= (пути к скриптам и eval в ТЗ — относительно неё):
 - =app/api/= — роутеры, схемы запросов/ответов;
 - =app/services/= — rag, dialog, voice, ingestion;
 - =app/adapters/= — embedders, vector_stores, llm, stt, tts (каждый — Protocol + реализации);
