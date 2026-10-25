@@ -1,8 +1,8 @@
 from fastapi.testclient import TestClient
 
 from app.adapters.llm.stub import StubLLMClient
-from app.main import create_app
 from app.services.llm_answer import NO_ANSWER, LLMAnswer
+from tests.factories import build_app
 
 
 def test_ask_returns_stub_answer(client: TestClient) -> None:
@@ -22,7 +22,7 @@ class EchoLLM(StubLLMClient):
 
 
 def test_ask_uses_llm_from_lifespan() -> None:
-    with TestClient(create_app(llm_factory=EchoLLM)) as client:
+    with TestClient(build_app(llm_factory=EchoLLM)) as client:
         response = client.post("/ask", json={"question": "привет"})
 
     body = response.json()
