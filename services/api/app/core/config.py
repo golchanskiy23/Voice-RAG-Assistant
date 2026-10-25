@@ -35,6 +35,23 @@ class Settings(DatabaseSettings):
     rag_min_score: float = 0.0
     rag_context_tokens: int = Field(default=3000, gt=0)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    stt: Literal["stub", "faster-whisper"] = "stub"
+    whisper_model: str = "small"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    stt_partial_interval: float = Field(default=1.0, ge=0)
+    vad: Literal["energy", "silero"] = "energy"
+    vad_threshold_dbfs: float = -40.0
+    vad_min_silence_ms: int = Field(default=600, ge=60)
+    tts: Literal["stub", "silero"] = "stub"
+    tts_speaker: str = "xenia"
+    tts_sample_rate: int = 24_000
+    voice_warm_up: bool = True
+    voice_streaming: bool = True
+    voice_first_chunk_chars: int = Field(default=80, ge=0)
+    stub_llm_token_delay: float = Field(default=0.0, ge=0)
+    stub_tts_realtime_factor: float = Field(default=0.0, ge=0)
+    max_utterance_seconds: float = Field(default=30.0, gt=0)
     embedder: Literal["hashing", "openai", "e5", "bge-m3"] = "hashing"
     embedder_device: str = "cpu"
     openai_api_key: SecretStr | None = None

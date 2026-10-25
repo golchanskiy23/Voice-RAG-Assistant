@@ -12,9 +12,13 @@ from app.adapters.llm.base import LLMClient
 from app.adapters.llm.registry import build_llm
 from app.adapters.rerankers.base import Reranker
 from app.adapters.rerankers.registry import build_reranker
+from app.adapters.stt.base import SpeechToText
+from app.adapters.tts.base import TextToSpeech
+from app.adapters.vad.base import VoiceActivityDetector
 from app.adapters.vector_stores.base import StoreName, VectorStore
 from app.adapters.vector_stores.pgvector import PgVectorStore
 from app.adapters.vector_stores.qdrant import QdrantVectorStore
+from app.adapters.voice_registry import stt_registry, tts_registry, vad_factory
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.database import Database
@@ -29,6 +33,13 @@ from app.services.prompts import load_answer_prompt
 STARTUP_TIMEOUT_SECONDS = 3.0
 
 
+async def warm_up(*resources: object) -> None:
+    for resource in resources:
+        warm = getattr(resource, "warm_up", None)
+        if warm is not None:
+            await warm()
+
+
 def create_app(
     settings: Settings | None = None,
     llm_factory: Callable[[], LLMClient] | None = None,
@@ -38,6 +49,9 @@ def create_app(
     count_tokens: Callable[[str], int] = count_llm_tokens,
     keyword_factory: Callable[[Database], KeywordIndex] = PostgresBM25,
     reranker_factory: Callable[[], Reranker | None] | None = None,
+    stt_factory: Callable[[], SpeechToText] | None = None,
+    tts_factory: Callable[[], TextToSpeech] | None = None,
+    vad: Callable[[], VoiceActivityDetector] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -56,6 +70,18 @@ def create_app(
         )
         ensure_dimension(embedder)
         ensure_chunk_fits(embedder, resolved.chunk_size)
+        stt = (
+            stt_factory()
+            if stt_factory
+            else await asyncio.to_thread(stt_registry.create, resolved.stt, resolved)
+        )
+        tts = (
+            tts_factory()
+            if tts_factory
+            else await asyncio.to_thread(tts_registry.create, resolved.tts, resolved)
+        )
+        if resolved.voice_warm_up:
+            await warm_up(stt, tts)
         llm = llm_factory() if llm_factory else build_llm(resolved)
         database = (
             database_factory(resolved) if database_factory else Database(str(resolved.database_url))
@@ -71,6 +97,8 @@ def create_app(
             "qdrant": qdrant,
             "embedder": embedder,
             "llm": llm,
+            "stt": stt,
+            "tts": tts,
         }
         if reranker is not None:
             resources["reranker"] = reranker
@@ -84,6 +112,9 @@ def create_app(
         app.state.index = qdrant_store
         app.state.keyword = keyword_factory(database)
         app.state.reranker = reranker
+        app.state.stt = stt
+        app.state.tts = tts
+        app.state.vad_factory = vad or vad_factory(resolved)
         app.state.prompt = prompt
         app.state.count_tokens = count_tokens
         try:

@@ -67,7 +67,12 @@ class FinalEvent:
     latency_ms: Latency
 
 
-StreamEvent = TokenEvent | FinalEvent
+@dataclass(frozen=True)
+class RetrievedEvent:
+    chunks: int
+
+
+StreamEvent = RetrievedEvent | TokenEvent | FinalEvent
 
 
 @dataclass(frozen=True)
@@ -151,6 +156,7 @@ class RAGService:
         start = time.perf_counter()
         retrieval = await self._retrieve(question)
         latency = retrieval.latency_ms
+        yield RetrievedEvent(len(retrieval.hits))
         if not retrieval.hits:
             latency["total"] = elapsed_ms(start)
             self._log("rag_stream", question, retrieval, Generation(refusal()), refusal(), latency)

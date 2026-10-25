@@ -7,6 +7,9 @@ from app.adapters.embedders.base import Embedder
 from app.adapters.embedders.hashing import HashingEmbedder, words
 from app.adapters.llm.base import LLMClient
 from app.adapters.llm.stub import StubLLMClient
+from app.adapters.stt.base import SpeechToText
+from app.adapters.stt.stub import StubSTT
+from app.adapters.tts.stub import StubTTS
 from app.adapters.vector_stores.base import SearchHit
 from app.api.deps import get_document_repository
 from app.core.config import Settings
@@ -149,6 +152,7 @@ def build_app(
     documents: DocumentRepository | None = None,
     embedder_factory: Callable[[], Embedder] = HashingEmbedder,
     count_tokens: Callable[[str], int] = count_words,
+    stt_factory: Callable[[], SpeechToText] = StubSTT,
 ) -> FastAPI:
     fake_database = database or FakeDatabase()
     fake_qdrant = qdrant or FakeQdrant()
@@ -166,6 +170,8 @@ def build_app(
         embedder_factory=embedder_factory,
         count_tokens=count_tokens,
         keyword_factory=lambda _: keyword,
+        stt_factory=stt_factory,
+        tts_factory=StubTTS,
     )
     app.dependency_overrides[get_document_repository] = lambda: repository
     return app

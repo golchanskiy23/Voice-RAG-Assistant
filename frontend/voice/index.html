@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Голосовой ассистент</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+    --accent: #2f6fde; --danger: #c8412d; --border: #e3e3de;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #9a9993; --border: #33332f; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0; }
+  button, input { font: inherit; border-radius: 8px; border: 1px solid var(--border); padding: 10px 14px; }
+  button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; }
+  button.secondary { background: var(--panel); color: var(--text); border-color: var(--border); }
+  button.recording { background: var(--danger); border-color: var(--danger); }
+  button:disabled { opacity: .5; cursor: default; }
+  input { flex: 1 1 240px; background: var(--panel); color: var(--text); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-top: 12px; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 6px; }
+  #partial { color: var(--muted); font-style: italic; }
+  #sources li { margin-bottom: 6px; }
+  #latency { font-family: ui-monospace, monospace; font-size: 13px; white-space: pre-wrap; }
+  .status { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
+  .status.on { background: #2e9e5b; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Голосовой ассистент</h1>
+  <div class="muted"><span id="dot" class="status"></span><span id="state">не подключено</span></div>
+
+  <div class="controls">
+    <button id="mic">🎙 Говорить</button>
+    <button id="stop" class="secondary">Прервать ответ</button>
+  </div>
+  <form id="ask" class="controls">
+    <input id="question" placeholder="или напишите вопрос" autocomplete="off">
+    <button class="secondary">Спросить</button>
+  </form>
+
+  <div class="panel"><div class="label">Вы сказали</div><div id="final">—</div><div id="partial"></div></div>
+  <div class="panel"><div class="label">Ответ</div><div id="answer">—</div></div>
+  <div class="panel"><div class="label">Источники</div><ul id="sources"></ul></div>
+  <div class="panel"><div class="label">Задержка, мс от конца речи</div><div id="latency">—</div></div>
+  <p class="muted">Лучше в наушниках: иначе ответ из динамиков может прерывать сам себя (barge-in).</p>
+</main>
+
+<script>
+const WS_URL = new URLSearchParams(location.search).get("ws") || `ws://${location.hostname || "localhost"}:8000/ws/voice`;
+const $ = (id) => document.getElementById(id);
+
+const workletCode = `
+class Capture extends AudioWorkletProcessor {
+  process(inputs) {
+    const channel = inputs[0][0];
+    if (channel) {
+      const pcm = new Int16Array(channel.length);
+      for (let i = 0; i < channel.length; i++) {
+        const s = Math.max(-1, Math.min(1, channel[i]));
+        pcm[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+      this.port.postMessage(pcm.buffer, [pcm.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor("capture", Capture);`;
+
+let ws, captureContext, stream, playback, nextTime = 0, playing = [];
+let answerParts = [];
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => { $("dot").classList.add("on"); $("state").textContent = "подключено"; };
+  ws.onclose = () => { $("dot").classList.remove("on"); $("state").textContent = "соединение закрыто"; setTimeout(connect, 2000); };
+  ws.onmessage = (event) => handle(JSON.parse(event.data));
+}
+
+function handle(message) {
+  switch (message.type) {
+    case "ready":
+      $("state").textContent = `подключено · STT ${message.stt} · TTS ${message.tts}`;
+      break;
+    case "partial_transcript":
+      $("partial").textContent = message.text;
+      break;
+    case "final_transcript":
+      $("final").textContent = message.text || "—";
+      $("partial").textContent = "";
+      resetAnswer();
+      break;
+    case "answer_text":
+      answerParts.push(message.text);
+      $("answer").textContent = answerParts.join(" ");
+      break;
+    case "audio_chunk":
+      play(message);
+      break;
+    case "sources":
+      $("sources").replaceChildren(...message.sources.map((s) => {
+        const li = document.createElement("li");
+        li.textContent = `${s.filename}${s.page ? `, стр. ${s.page}` : ""}${s.section ? ` · ${s.section}` : ""} — «${s.quote}»`;
+        return li;
+      }));
+      break;
+    case "done":
+      $("latency").textContent = Object.entries(message.latency).map(([k, v]) => `${k.padEnd(18)} ${v}`).join("\n");
+      break;
+    case "interrupted":
+      stopPlayback();
+      $("answer").textContent += ` [прервано: ${message.reason}]`;
+      break;
+    case "error":
+      $("answer").textContent = `Ошибка: ${message.error.message}`;
+      break;
+  }
+}
+
+function resetAnswer() {
+  answerParts = [];
+  $("answer").textContent = "…";
+  $("sources").replaceChildren();
+  $("latency").textContent = "—";
+}
+
+function play(message) {
+  playback ||= new AudioContext();
+  const bytes = Uint8Array.from(atob(message.data), (c) => c.charCodeAt(0));
+  const pcm = new Int16Array(bytes.buffer);
+  const buffer = playback.createBuffer(1, pcm.length, message.sample_rate);
+  const channel = buffer.getChannelData(0);
+  for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 0x8000;
+  const source = playback.createBufferSource();
+  source.buffer = buffer;
+  source.connect(playback.destination);
+  nextTime = Math.max(nextTime, playback.currentTime + 0.02);
+  source.start(nextTime);
+  nextTime += buffer.duration;
+  playing.push(source);
+  source.onended = () => { playing = playing.filter((s) => s !== source); };
+}
+
+function stopPlayback() {
+  playing.forEach((s) => { try { s.stop(); } catch {} });
+  playing = [];
+  nextTime = 0;
+}
+
+async function startMic() {
+  stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  captureContext = new AudioContext({ sampleRate: 16000 });
+  const url = URL.createObjectURL(new Blob([workletCode], { type: "application/javascript" }));
+  await captureContext.audioWorklet.addModule(url);
+  const node = new AudioWorkletNode(captureContext, "capture");
+  node.port.onmessage = (event) => { if (ws.readyState === WebSocket.OPEN) ws.send(event.data); };
+  captureContext.createMediaStreamSource(stream).connect(node);
+  ws.send(JSON.stringify({ type: "start", format: "pcm16" }));
+  $("mic").textContent = "■ Выключить микрофон";
+  $("mic").classList.add("recording");
+}
+
+async function stopMic() {
+  stream?.getTracks().forEach((t) => t.stop());
+  await captureContext?.close();
+  captureContext = null;
+  ws.send(JSON.stringify({ type: "end" }));
+  $("mic").textContent = "🎙 Говорить";
+  $("mic").classList.remove("recording");
+}
+
+$("mic").onclick = () => (captureContext ? stopMic() : startMic().catch((e) => alertText(e)));
+$("stop").onclick = () => { ws.send(JSON.stringify({ type: "cancel" })); stopPlayback(); };
+$("ask").onsubmit = (event) => {
+  event.preventDefault();
+  const question = $("question").value.trim();
+  if (!question) return;
+  $("final").textContent = question;
+  resetAnswer();
+  ws.send(JSON.stringify({ type: "text", question }));
+};
+function alertText(error) { $("state").textContent = `микрофон недоступен: ${error.message}`; }
+
+connect();
+</script>
+</body>
+</html>
