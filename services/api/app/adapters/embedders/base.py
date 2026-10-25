@@ -23,6 +23,21 @@ class Embedder(Resource, Protocol):
     async def embed_query(self, text: str) -> list[float]: ...
 
 
+SPECIAL_TOKENS_RESERVE = 16
+
+
+class ChunkTooLargeError(RuntimeError):
+    pass
+
+
+def ensure_chunk_fits(embedder: Embedder, chunk_size: int) -> None:
+    if chunk_size + SPECIAL_TOKENS_RESERVE > embedder.max_tokens:
+        raise ChunkTooLargeError(
+            f"chunk_size={chunk_size} + {SPECIAL_TOKENS_RESERVE} служебных токенов не помещается "
+            f"в лимит эмбеддера {embedder.name!r} ({embedder.max_tokens} токенов)"
+        )
+
+
 class EmbeddingDimensionError(RuntimeError):
     pass
 
