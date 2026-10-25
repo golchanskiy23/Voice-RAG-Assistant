@@ -4,12 +4,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from app.main import create_app
+from tests.factories import build_app
 
 
 @pytest.fixture
 def app() -> FastAPI:
-    return create_app()
+    return build_app()
 
 
 @pytest.fixture

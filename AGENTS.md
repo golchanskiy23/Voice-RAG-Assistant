@@ -82,11 +82,14 @@ tests/
 ## Команды
 
 ```bash
-docker compose up -d                 # из корня: поднять api, postgres(pgvector), qdrant, redis
+docker compose up -d --build --wait  # из корня: postgres, qdrant, миграции (migrate), api
+docker compose run --rm migrate alembic downgrade -1   # откат последней миграции
 cd services/api                      # остальные команды — отсюда
 uv run pytest                        # тесты
 uv run ruff check . && uv run ruff format --check .
-uv run mypy app/
+uv run mypy app tests migrations
+DATABASE_URL=postgresql+asyncpg://rag:rag@localhost:5433/rag uv run alembic upgrade head
+uv run alembic revision -m "<описание>"   # новая миграция, SQL пишется вручную
 uv run python scripts/index.py ../../data/  # индексация папки
 uv run python scripts/eval_retrieval.py --config <name>   # recall@1/3/5, MRR
 uv run python scripts/eval_latency.py                     # p50/p95 по этапам
