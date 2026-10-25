@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app.adapters.embedders.base import ChunkTooLargeError
 from app.core.config import DatabaseSettings, Settings
 from tests.factories import TEST_ADMIN_API_KEY, TEST_DATABASE_URL, TEST_QDRANT_URL, build_app
 
@@ -62,6 +63,30 @@ def test_requires_admin_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_admin_api_key_is_hidden_in_repr() -> None:
     assert TEST_ADMIN_API_KEY not in repr(Settings())
+
+
+def test_chunk_defaults() -> None:
+    settings = Settings()
+
+    assert (settings.chunk_size, settings.chunk_overlap) == (300, 45)
+
+
+def test_chunk_overlap_must_be_smaller_than_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CHUNK_SIZE", "100")
+    monkeypatch.setenv("CHUNK_OVERLAP", "100")
+
+    with pytest.raises(ValidationError, match="chunk_overlap"):
+        Settings()
+
+
+def test_app_refuses_chunk_larger_than_embedder_limit() -> None:
+    settings = Settings(chunk_size=500)
+
+    with (
+        pytest.raises(ChunkTooLargeError, match="chunk_size=500"),
+        TestClient(build_app(settings=settings)),
+    ):
+        pass
 
 
 def test_rejects_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:

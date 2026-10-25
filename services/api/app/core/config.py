@@ -1,7 +1,7 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import AnyHttpUrl, PostgresDsn, SecretStr
+from pydantic import AnyHttpUrl, Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,6 +16,14 @@ class Settings(DatabaseSettings):
     embedder: Literal["hashing"] = "hashing"
     qdrant_url: AnyHttpUrl
     admin_api_key: SecretStr
+    chunk_size: int = Field(default=300, gt=0)
+    chunk_overlap: int = Field(default=45, ge=0)
+
+    @model_validator(mode="after")
+    def overlap_smaller_than_chunk(self) -> Self:
+        if self.chunk_overlap >= self.chunk_size:
+            raise ValueError("chunk_overlap должен быть меньше chunk_size")
+        return self
 
 
 @lru_cache

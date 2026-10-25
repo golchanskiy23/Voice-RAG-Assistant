@@ -18,7 +18,8 @@ class ReadyResponse(BaseModel):
 class DocumentUploadResponse(BaseModel):
     id: uuid.UUID
     chunks: int
-    status: Literal["created", "exists"]
+    pages: int | None
+    status: Literal["created", "replaced", "exists"]
 
 
 class AskRequest(BaseModel):

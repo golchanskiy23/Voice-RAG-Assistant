@@ -9,6 +9,8 @@ services:
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
       EMBEDDER: ${EMBEDDER:-hashing}
+      CHUNK_SIZE: ${CHUNK_SIZE:-300}
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP:-45}
       DATABASE_URL: *database-url
       QDRANT_URL: http://qdrant:6333
       ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
