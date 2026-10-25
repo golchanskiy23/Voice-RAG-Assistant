@@ -10,6 +10,7 @@ from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.database import Database
 from app.core.errors import register_error_handlers
+from app.core.qdrant import Qdrant
 from app.core.request_id import request_id_middleware
 
 
@@ -17,6 +18,7 @@ def create_app(
     settings: Settings | None = None,
     llm_factory: Callable[[], LLMClient] | None = None,
     database_factory: Callable[[Settings], Database] | None = None,
+    qdrant_factory: Callable[[Settings], Qdrant] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -25,10 +27,12 @@ def create_app(
         database = (
             database_factory(resolved) if database_factory else Database(str(resolved.database_url))
         )
-        resources: dict[str, Resource] = {"postgres": database, "llm": llm}
+        qdrant = qdrant_factory(resolved) if qdrant_factory else Qdrant(str(resolved.qdrant_url))
+        resources: dict[str, Resource] = {"postgres": database, "qdrant": qdrant, "llm": llm}
         app.state.settings = resolved
         app.state.llm = llm
         app.state.database = database
+        app.state.qdrant = qdrant
         app.state.resources = resources
         try:
             yield

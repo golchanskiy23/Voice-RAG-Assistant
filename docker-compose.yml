@@ -48,7 +48,7 @@ services:
     restart: unless-stopped
 
   qdrant:
-    image: qdrant/qdrant:v1.13.6
+    image: qdrant/qdrant:v1.20.0
     ports:
       - "127.0.0.1:${QDRANT_PORT:-6334}:6333"
     volumes:
