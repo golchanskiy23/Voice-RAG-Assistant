@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.services.rag import Latency
+
 
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
@@ -28,4 +30,4 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[SourceOut]
     confidence: float = Field(ge=0, le=1)
-    latency: dict[str, float]
+    latency: Latency

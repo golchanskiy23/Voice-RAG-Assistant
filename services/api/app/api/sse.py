@@ -1,10 +1,12 @@
 import json
 from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import aclosing
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from app.api.schemas import SourceOut
 from app.services.rag import FinalEvent, StreamEvent, TokenEvent
+
+SSEEvent = Literal["token", "sources", "done", "error"]
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
@@ -13,7 +15,7 @@ class ClientConnection(Protocol):
     async def is_disconnected(self) -> bool: ...
 
 
-def format_sse(event: str, data: dict[str, Any]) -> str:
+def format_sse(event: SSEEvent, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
