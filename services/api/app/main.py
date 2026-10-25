@@ -4,6 +4,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.adapters.base import Resource
+from app.adapters.embedders.base import Embedder, ensure_dimension
+from app.adapters.embedders.registry import embedder_registry
 from app.adapters.llm.base import LLMClient
 from app.adapters.llm.registry import llm_registry
 from app.api.router import api_router
@@ -19,18 +21,29 @@ def create_app(
     llm_factory: Callable[[], LLMClient] | None = None,
     database_factory: Callable[[Settings], Database] | None = None,
     qdrant_factory: Callable[[Settings], Qdrant] | None = None,
+    embedder_factory: Callable[[], Embedder] | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolved = settings or get_settings()
+        embedder = (
+            embedder_factory() if embedder_factory else embedder_registry.create(resolved.embedder)
+        )
+        ensure_dimension(embedder)
         llm = llm_factory() if llm_factory else llm_registry.create(resolved.llm_provider)
         database = (
             database_factory(resolved) if database_factory else Database(str(resolved.database_url))
         )
         qdrant = qdrant_factory(resolved) if qdrant_factory else Qdrant(str(resolved.qdrant_url))
-        resources: dict[str, Resource] = {"postgres": database, "qdrant": qdrant, "llm": llm}
+        resources: dict[str, Resource] = {
+            "postgres": database,
+            "qdrant": qdrant,
+            "embedder": embedder,
+            "llm": llm,
+        }
         app.state.settings = resolved
         app.state.llm = llm
+        app.state.embedder = embedder
         app.state.database = database
         app.state.qdrant = qdrant
         app.state.resources = resources

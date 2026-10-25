@@ -21,7 +21,7 @@ def test_ready_when_llm_available(client: TestClient) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ready",
-        "checks": {"postgres": True, "qdrant": True, "llm": True},
+        "checks": {"postgres": True, "qdrant": True, "embedder": True, "llm": True},
     }
 
 
@@ -37,7 +37,7 @@ def test_ready_when_llm_unavailable() -> None:
     assert response.status_code == 503
     assert response.json() == {
         "status": "not_ready",
-        "checks": {"postgres": True, "qdrant": True, "llm": False},
+        "checks": {"postgres": True, "qdrant": True, "embedder": True, "llm": False},
     }
 
 
@@ -73,7 +73,12 @@ def test_ready_treats_timeout_and_errors_as_not_ready(
         response = client.get("/ready")
 
     assert response.status_code == 503
-    assert response.json()["checks"] == {"postgres": True, "qdrant": True, "llm": False}
+    assert response.json()["checks"] == {
+        "postgres": True,
+        "qdrant": True,
+        "embedder": True,
+        "llm": False,
+    }
 
 
 def test_ready_reports_postgres_unavailable() -> None:
@@ -81,7 +86,12 @@ def test_ready_reports_postgres_unavailable() -> None:
         response = client.get("/ready")
 
     assert response.status_code == 503
-    assert response.json()["checks"] == {"postgres": False, "qdrant": True, "llm": True}
+    assert response.json()["checks"] == {
+        "postgres": False,
+        "qdrant": True,
+        "embedder": True,
+        "llm": True,
+    }
 
 
 def test_lifespan_closes_database() -> None:
@@ -97,7 +107,12 @@ def test_ready_reports_qdrant_unavailable() -> None:
         response = client.get("/ready")
 
     assert response.status_code == 503
-    assert response.json()["checks"] == {"postgres": True, "qdrant": False, "llm": True}
+    assert response.json()["checks"] == {
+        "postgres": True,
+        "qdrant": False,
+        "embedder": True,
+        "llm": True,
+    }
 
 
 def test_lifespan_closes_qdrant() -> None:
