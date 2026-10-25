@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Awaitable, Callable
 
+import structlog
 from fastapi import Request, Response
 
 REQUEST_ID_HEADER = "X-Request-ID"
@@ -11,6 +12,8 @@ async def request_id_middleware(
 ) -> Response:
     request_id = request.headers.get(REQUEST_ID_HEADER) or uuid.uuid4().hex
     request.state.request_id = request_id
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(request_id=request_id)
     response = await call_next(request)
     response.headers[REQUEST_ID_HEADER] = request_id
     return response

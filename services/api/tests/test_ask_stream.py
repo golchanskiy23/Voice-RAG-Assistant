@@ -5,11 +5,12 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from app.adapters.llm.base import LLMChunk, LLMRequest, TextDelta
 from app.adapters.llm.stub import StubLLMClient
 from app.api.sse import stream_sse
-from app.services.llm_answer import NO_ANSWER
 from app.services.rag import FinalEvent, StreamEvent, TokenEvent
 from tests.factories import build_app
+from tests.test_search import FAQ, upload
 
 
 def parse_sse(body: str) -> list[tuple[str, dict[str, Any]]]:
@@ -21,7 +22,8 @@ def parse_sse(body: str) -> list[tuple[str, dict[str, Any]]]:
 
 
 def test_stream_emits_tokens_then_sources_then_done(client: TestClient) -> None:
-    with client.stream("POST", "/ask/stream", json={"question": "Что такое RAG?"}) as response:
+    upload(client, "faq.md", FAQ)
+    with client.stream("POST", "/ask/stream", json={"question": "лимиты файлов"}) as response:
         body = response.read().decode()
 
     assert response.status_code == 200
@@ -33,9 +35,12 @@ def test_stream_emits_tokens_then_sources_then_done(client: TestClient) -> None:
     tokens = [data["text"] for name, data in events if name == "token"]
     assert names[-2:] == ["sources", "done"]
     assert set(names[:-2]) == {"token"}
-    assert "".join(tokens) == NO_ANSWER
-    assert events[-2][1] == {"sources": [], "confidence": 0.0}
-    assert set(events[-1][1]["latency"]) == {"first_token", "llm"}
+    assert len(tokens) > 1
+    assert "".join(tokens) == "Файлы больше двадцати мегабайт отклоняются."
+    sources = events[-2][1]
+    assert [s["filename"] for s in sources["sources"]] == ["faq.md"]
+    assert sources["confidence"] == 0.5
+    assert {"first_token", "llm", "total"} <= set(events[-1][1]["latency"])
 
 
 def test_stream_rejects_empty_question(client: TestClient) -> None:
@@ -46,19 +51,18 @@ def test_stream_rejects_empty_question(client: TestClient) -> None:
 
 
 class FailingLLM(StubLLMClient):
-    async def stream(self, prompt: str) -> AsyncIterator[str]:
-        yield "Начало "
+    async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
+        yield TextDelta('{"answer": "Начало ')
         raise RuntimeError("provider down")
 
 
 def test_stream_reports_error_event_mid_stream() -> None:
-    with (
-        TestClient(build_app(llm_factory=FailingLLM)) as client,
-        client.stream(
+    with TestClient(build_app(llm_factory=FailingLLM)) as client:
+        upload(client, "faq.md", FAQ)
+        with client.stream(
             "POST", "/ask/stream", json={"question": "q"}, headers={"X-Request-ID": "req-9"}
-        ) as response,
-    ):
-        events = parse_sse(response.read().decode())
+        ) as response:
+            events = parse_sse(response.read().decode())
 
     assert events[0] == ("token", {"text": "Начало "})
     name, data = events[-1]
