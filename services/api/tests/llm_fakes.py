@@ -83,10 +83,13 @@ class ScriptedLLM(StubLLMClient):
         yield StreamEnd(provider=self.name, usage=Usage(100, 20))
 
 
+def make_search(hits: Sequence[SearchHit]) -> SearchService:
+    return SearchService(HashingEmbedder(), {"qdrant": FixedStore(hits)})
+
+
 def make_service(
     llm: ScriptedLLM | StubLLMClient,
     hits: Sequence[SearchHit],
     settings: RAGSettings | None = None,
 ) -> RAGService:
-    search = SearchService(HashingEmbedder(), {"qdrant": FixedStore(hits)}, "qdrant")
-    return RAGService(search, llm, PROMPT, count_words, settings)
+    return RAGService(make_search(hits), llm, PROMPT, count_words, settings)

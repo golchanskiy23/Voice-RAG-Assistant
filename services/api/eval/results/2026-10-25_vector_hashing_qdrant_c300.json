@@ -1,0 +1,983 @@
+{
+  "config": "vector_hashing_qdrant_c300",
+  "date": "2026-10-25",
+  "settings": {
+    "mode": "vector",
+    "rerank": null,
+    "embedder": "hashing",
+    "store": "qdrant",
+    "chunk_size": 300,
+    "chunk_overlap": 45,
+    "rrf_k": 60,
+    "questions_file": "eval/questions.jsonl"
+  },
+  "indexing": {
+    "documents": 8,
+    "chunks": 52,
+    "seconds": 0.23
+  },
+  "metrics": {
+    "recall@1": 0.6364,
+    "recall@3": 0.7727,
+    "recall@5": 0.7955,
+    "mrr": 0.7048,
+    "questions": 44,
+    "top1_score_in_scope": 0.2891,
+    "top1_score_out_of_scope": 0.2143
+  },
+  "by_type": {
+    "fact": {
+      "recall@1": 0.7143,
+      "recall@3": 0.8571,
+      "recall@5": 0.8571,
+      "mrr": 0.7766,
+      "questions": 21
+    },
+    "paraphrase": {
+      "recall@1": 0.5789,
+      "recall@3": 0.7368,
+      "recall@5": 0.7368,
+      "mrr": 0.6579,
+      "questions": 19
+    },
+    "procedure": {
+      "recall@1": 0.5,
+      "recall@3": 0.5,
+      "recall@5": 0.75,
+      "mrr": 0.55,
+      "questions": 4
+    }
+  },
+  "latency_ms": {
+    "p50": 2.27,
+    "p95": 3.1
+  },
+  "questions": [
+    {
+      "id": "q01",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.169031,
+      "top_files": [
+        "otpusk.md",
+        "otpusk.md",
+        "ofis.md",
+        "onboarding.md",
+        "otpusk.md"
+      ],
+      "latency_ms": 2.3
+    },
+    {
+      "id": "q02",
+      "type": "fact",
+      "first_relevant_rank": null,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.136083,
+      "top_files": [
+        "otpusk.md",
+        "rashody.md",
+        "otpusk.md",
+        "komandirovki.md",
+        "it-support.md"
+      ],
+      "latency_ms": 1.3
+    },
+    {
+      "id": "q03",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.2,
+      "top_files": [
+        "otpusk.md",
+        "ofis.md",
+        "otpusk.md",
+        "rashody.md",
+        "infobez.md"
+      ],
+      "latency_ms": 1.17
+    },
+    {
+      "id": "q04",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.434372,
+      "top_files": [
+        "otpusk.md",
+        "otpusk.md",
+        "it-support.md",
+        "otpusk.md",
+        "otpusk.md"
+      ],
+      "latency_ms": 1.15
+    },
+    {
+      "id": "q05",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.248495,
+      "top_files": [
+        "otpusk.md",
+        "ofis.md",
+        "ofis.md",
+        "komandirovki.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 1.22
+    },
+    {
+      "id": "q06",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.450749,
+      "top_files": [
+        "otpusk.md",
+        "ofis.md",
+        "rashody.md",
+        "rashody.md",
+        "ofis.md"
+      ],
+      "latency_ms": 1.33
+    },
+    {
+      "id": "q07",
+      "type": "paraphrase",
+      "first_relevant_rank": 2,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.2,
+      "top_files": [
+        "otpusk.md",
+        "otpusk.md",
+        "otpusk.md",
+        "it-support.md",
+        "otpusk.md"
+      ],
+      "latency_ms": 1.67
+    },
+    {
+      "id": "q08",
+      "type": "procedure",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.208514,
+      "top_files": [
+        "otpusk.md",
+        "udalenka.md",
+        "it-support.md",
+        "rashody.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 1.7
+    },
+    {
+      "id": "q09",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.400892,
+      "top_files": [
+        "otpusk.md",
+        "rashody.md",
+        "otpusk.md",
+        "otpusk.md",
+        "ofis.md"
+      ],
+      "latency_ms": 1.43
+    },
+    {
+      "id": "q10",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.416667,
+      "top_files": [
+        "otpusk.md",
+        "udalenka.md",
+        "komandirovki.md",
+        "otpusk.md",
+        "ofis.md"
+      ],
+      "latency_ms": 1.18
+    },
+    {
+      "id": "q11",
+      "type": "fact",
+      "first_relevant_rank": 3,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.29019,
+      "top_files": [
+        "udalenka.md",
+        "rashody.md",
+        "komandirovki.md",
+        "udalenka.md",
+        "rashody.md"
+      ],
+      "latency_ms": 1.15
+    },
+    {
+      "id": "q12",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.330791,
+      "top_files": [
+        "komandirovki.md",
+        "udalenka.md",
+        "udalenka.md",
+        "it-support.md",
+        "it-support.md"
+      ],
+      "latency_ms": 1.27
+    },
+    {
+      "id": "q13",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.412569,
+      "top_files": [
+        "komandirovki.md",
+        "rashody.md",
+        "it-support.md",
+        "komandirovki.md",
+        "infobez.md"
+      ],
+      "latency_ms": 1.47
+    },
+    {
+      "id": "q14",
+      "type": "paraphrase",
+      "first_relevant_rank": null,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.264906,
+      "top_files": [
+        "udalenka.md",
+        "udalenka.md",
+        "rashody.md",
+        "it-support.md",
+        "rashody.md"
+      ],
+      "latency_ms": 1.58
+    },
+    {
+      "id": "q15",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.249136,
+      "top_files": [
+        "komandirovki.md",
+        "ofis.md",
+        "ofis.md",
+        "udalenka.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 1.84
+    },
+    {
+      "id": "q16",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.363137,
+      "top_files": [
+        "komandirovki.md",
+        "infobez.md",
+        "rashody.md",
+        "rashody.md",
+        "otpusk.md"
+      ],
+      "latency_ms": 2.35
+    },
+    {
+      "id": "q17",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.353553,
+      "top_files": [
+        "komandirovki.md",
+        "rashody.md",
+        "udalenka.md",
+        "it-support.md",
+        "rashody.md"
+      ],
+      "latency_ms": 2.59
+    },
+    {
+      "id": "q18",
+      "type": "paraphrase",
+      "first_relevant_rank": null,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.316228,
+      "top_files": [
+        "udalenka.md",
+        "udalenka.md",
+        "komandirovki.md",
+        "rashody.md",
+        "komandirovki.md"
+      ],
+      "latency_ms": 2.3
+    },
+    {
+      "id": "q19",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.246183,
+      "top_files": [
+        "infobez.md",
+        "udalenka.md",
+        "it-support.md",
+        "it-support.md",
+        "rashody.md"
+      ],
+      "latency_ms": 2.27
+    },
+    {
+      "id": "q20",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.159901,
+      "top_files": [
+        "infobez.md",
+        "infobez.md",
+        "ofis.md",
+        "rashody.md",
+        "infobez.md"
+      ],
+      "latency_ms": 2.51
+    },
+    {
+      "id": "q21",
+      "type": "fact",
+      "first_relevant_rank": 7,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.271538,
+      "top_files": [
+        "infobez.md",
+        "infobez.md",
+        "otpusk.md",
+        "onboarding.md",
+        "ofis.md"
+      ],
+      "latency_ms": 2.28
+    },
+    {
+      "id": "q22",
+      "type": "procedure",
+      "first_relevant_rank": null,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.164957,
+      "top_files": [
+        "infobez.md",
+        "otpusk.md",
+        "komandirovki.md",
+        "ofis.md",
+        "infobez.md"
+      ],
+      "latency_ms": 2.21
+    },
+    {
+      "id": "q23",
+      "type": "procedure",
+      "first_relevant_rank": 5,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.283473,
+      "top_files": [
+        "it-support.md",
+        "otpusk.md",
+        "otpusk.md",
+        "onboarding.md",
+        "infobez.md"
+      ],
+      "latency_ms": 2.36
+    },
+    {
+      "id": "q24",
+      "type": "paraphrase",
+      "first_relevant_rank": null,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.204124,
+      "top_files": [
+        "rashody.md",
+        "udalenka.md",
+        "infobez.md",
+        "udalenka.md",
+        "ofis.md"
+      ],
+      "latency_ms": 2.13
+    },
+    {
+      "id": "q25",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.407307,
+      "top_files": [
+        "infobez.md",
+        "udalenka.md",
+        "infobez.md",
+        "komandirovki.md",
+        "rashody.md"
+      ],
+      "latency_ms": 2.37
+    },
+    {
+      "id": "q26",
+      "type": "paraphrase",
+      "first_relevant_rank": 2,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.147442,
+      "top_files": [
+        "otpusk.md",
+        "infobez.md",
+        "komandirovki.md",
+        "otpusk.md",
+        "rashody.md"
+      ],
+      "latency_ms": 2.26
+    },
+    {
+      "id": "q27",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.584898,
+      "top_files": [
+        "udalenka.md",
+        "rashody.md",
+        "infobez.md",
+        "it-support.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 2.44
+    },
+    {
+      "id": "q28",
+      "type": "procedure",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.374634,
+      "top_files": [
+        "udalenka.md",
+        "it-support.md",
+        "ofis.md",
+        "infobez.md",
+        "otpusk.md"
+      ],
+      "latency_ms": 2.28
+    },
+    {
+      "id": "q29",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.353553,
+      "top_files": [
+        "udalenka.md",
+        "otpusk.md",
+        "infobez.md",
+        "rashody.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 5.7
+    },
+    {
+      "id": "q30",
+      "type": "paraphrase",
+      "first_relevant_rank": null,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.218218,
+      "top_files": [
+        "rashody.md",
+        "otpusk.md",
+        "udalenka.md",
+        "onboarding.md",
+        "komandirovki.md"
+      ],
+      "latency_ms": 2.41
+    },
+    {
+      "id": "q31",
+      "type": "fact",
+      "first_relevant_rank": 2,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.186501,
+      "top_files": [
+        "otpusk.md",
+        "udalenka.md",
+        "komandirovki.md",
+        "otpusk.md",
+        "rashody.md"
+      ],
+      "latency_ms": 2.41
+    },
+    {
+      "id": "q32",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.293294,
+      "top_files": [
+        "udalenka.md",
+        "otpusk.md",
+        "it-support.md",
+        "komandirovki.md",
+        "otpusk.md"
+      ],
+      "latency_ms": 4.31
+    },
+    {
+      "id": "q33",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.320256,
+      "top_files": [
+        "onboarding.md",
+        "komandirovki.md",
+        "komandirovki.md",
+        "udalenka.md",
+        "rashody.md"
+      ],
+      "latency_ms": 2.72
+    },
+    {
+      "id": "q34",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.302372,
+      "top_files": [
+        "onboarding.md",
+        "infobez.md",
+        "ofis.md",
+        "komandirovki.md",
+        "infobez.md"
+      ],
+      "latency_ms": 2.78
+    },
+    {
+      "id": "q35",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.166667,
+      "top_files": [
+        "onboarding.md",
+        "otpusk.md",
+        "rashody.md",
+        "ofis.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 1.84
+    },
+    {
+      "id": "q36",
+      "type": "fact",
+      "first_relevant_rank": null,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.276026,
+      "top_files": [
+        "rashody.md",
+        "rashody.md",
+        "udalenka.md",
+        "udalenka.md",
+        "ofis.md"
+      ],
+      "latency_ms": 2.37
+    },
+    {
+      "id": "q37",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.329914,
+      "top_files": [
+        "onboarding.md",
+        "udalenka.md",
+        "onboarding.md",
+        "infobez.md",
+        "onboarding.md"
+      ],
+      "latency_ms": 2.24
+    },
+    {
+      "id": "q38",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.333333,
+      "top_files": [
+        "it-support.md",
+        "udalenka.md",
+        "udalenka.md",
+        "it-support.md",
+        "ofis.md"
+      ],
+      "latency_ms": 2.83
+    },
+    {
+      "id": "q39",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.31427,
+      "top_files": [
+        "it-support.md",
+        "it-support.md",
+        "ofis.md",
+        "rashody.md",
+        "otpusk.md"
+      ],
+      "latency_ms": 3.08
+    },
+    {
+      "id": "q40",
+      "type": "fact",
+      "first_relevant_rank": 3,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.30657,
+      "top_files": [
+        "udalenka.md",
+        "rashody.md",
+        "it-support.md",
+        "komandirovki.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 3.1
+    },
+    {
+      "id": "q41",
+      "type": "paraphrase",
+      "first_relevant_rank": 2,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.216506,
+      "top_files": [
+        "otpusk.md",
+        "it-support.md",
+        "ofis.md",
+        "infobez.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 2.0
+    },
+    {
+      "id": "q42",
+      "type": "fact",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.175412,
+      "top_files": [
+        "it-support.md",
+        "it-support.md",
+        "otpusk.md",
+        "onboarding.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 2.46
+    },
+    {
+      "id": "q43",
+      "type": "paraphrase",
+      "first_relevant_rank": 1,
+      "recall": {
+        "recall@1": 1.0,
+        "recall@3": 1.0,
+        "recall@5": 1.0
+      },
+      "top1_score": 0.406181,
+      "top_files": [
+        "rashody.md",
+        "udalenka.md",
+        "otpusk.md",
+        "udalenka.md",
+        "otpusk.md"
+      ],
+      "latency_ms": 2.29
+    },
+    {
+      "id": "q44",
+      "type": "paraphrase",
+      "first_relevant_rank": null,
+      "recall": {
+        "recall@1": 0.0,
+        "recall@3": 0.0,
+        "recall@5": 0.0
+      },
+      "top1_score": 0.229416,
+      "top_files": [
+        "rashody.md",
+        "otpusk.md",
+        "komandirovki.md",
+        "otpusk.md",
+        "rashody.md"
+      ],
+      "latency_ms": 3.03
+    },
+    {
+      "id": "q45",
+      "type": "out_of_scope",
+      "first_relevant_rank": null,
+      "recall": {},
+      "top1_score": 0.170251,
+      "top_files": [
+        "otpusk.md",
+        "it-support.md",
+        "it-support.md",
+        "ofis.md",
+        "ofis.md"
+      ],
+      "latency_ms": 1.85
+    },
+    {
+      "id": "q46",
+      "type": "out_of_scope",
+      "first_relevant_rank": null,
+      "recall": {},
+      "top1_score": 0.164957,
+      "top_files": [
+        "infobez.md",
+        "infobez.md",
+        "ofis.md",
+        "komandirovki.md",
+        "infobez.md"
+      ],
+      "latency_ms": 1.79
+    },
+    {
+      "id": "q47",
+      "type": "out_of_scope",
+      "first_relevant_rank": null,
+      "recall": {},
+      "top1_score": 0.362738,
+      "top_files": [
+        "udalenka.md",
+        "it-support.md",
+        "rashody.md",
+        "infobez.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 1.84
+    },
+    {
+      "id": "q48",
+      "type": "out_of_scope",
+      "first_relevant_rank": null,
+      "recall": {},
+      "top1_score": 0.080322,
+      "top_files": [
+        "udalenka.md",
+        "infobez.md",
+        "udalenka.md",
+        "komandirovki.md",
+        "udalenka.md"
+      ],
+      "latency_ms": 2.05
+    },
+    {
+      "id": "q49",
+      "type": "out_of_scope",
+      "first_relevant_rank": null,
+      "recall": {},
+      "top1_score": 0.251976,
+      "top_files": [
+        "otpusk.md",
+        "komandirovki.md",
+        "otpusk.md",
+        "ofis.md",
+        "onboarding.md"
+      ],
+      "latency_ms": 2.62
+    },
+    {
+      "id": "q50",
+      "type": "out_of_scope",
+      "first_relevant_rank": null,
+      "recall": {},
+      "top1_score": 0.255377,
+      "top_files": [
+        "ofis.md",
+        "it-support.md",
+        "infobez.md",
+        "ofis.md",
+        "komandirovki.md"
+      ],
+      "latency_ms": 2.65
+    }
+  ]
+}

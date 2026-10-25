@@ -3,8 +3,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.adapters.vector_stores.base import StoreName
+from app.adapters.vector_stores.base import Retriever, StoreName
 from app.services.rag import Latency
+from app.services.search import SearchMode
 
 
 class HealthResponse(BaseModel):
@@ -27,8 +28,9 @@ class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=5, ge=1, le=50)
     doc_ids: list[uuid.UUID] | None = None
-    mode: Literal["vector"] = "vector"
+    mode: SearchMode | None = None
     store: StoreName | None = None
+    rerank: bool | None = None
 
 
 class SearchChunkOut(BaseModel):
@@ -40,12 +42,15 @@ class SearchChunkOut(BaseModel):
     page: int | None
     section: str | None
     score: float
-    source: Literal["vector"]
+    source: Literal["vector", "bm25", "hybrid"]
+    found_by: list[Retriever]
 
 
 class SearchResponse(BaseModel):
     chunks: list[SearchChunkOut]
     store: StoreName
+    mode: SearchMode
+    reranked: bool
     latency: dict[str, float]
 
 
