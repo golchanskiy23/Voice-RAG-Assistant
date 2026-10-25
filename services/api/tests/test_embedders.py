@@ -10,7 +10,7 @@ from app.adapters.embedders.base import EMBEDDING_DIM, EmbeddingDimensionError, 
 from app.adapters.embedders.hashing import HashingEmbedder
 from app.adapters.embedders.registry import embedder_registry
 from app.adapters.embedders.vectors import cosine, l2_normalize
-from tests.factories import build_app
+from tests.factories import build_app, make_settings
 
 MIGRATION = (
     Path(__file__).resolve().parents[1] / "migrations" / "versions" / "0001_initial_schema.py"
@@ -68,7 +68,7 @@ def test_l2_normalize() -> None:
 
 
 def test_registry_creates_hashing_embedder() -> None:
-    assert isinstance(embedder_registry.create("hashing"), HashingEmbedder)
+    assert isinstance(embedder_registry.create("hashing", make_settings()), HashingEmbedder)
 
 
 def test_ensure_dimension_rejects_mismatch() -> None:

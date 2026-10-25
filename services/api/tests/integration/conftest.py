@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -5,6 +6,9 @@ import docker
 import pytest
 from alembic import command
 from alembic.config import Config
+from qdrant_client import AsyncQdrantClient
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 from testcontainers.community.postgres import PostgresContainer
 from testcontainers.community.qdrant import QdrantContainer
 
@@ -72,3 +76,24 @@ def settings(migrated_database_url: str, qdrant_url: str) -> Settings:
         qdrant_url=qdrant_url,
         admin_api_key=TEST_ADMIN_API_KEY,
     )
+
+
+def wipe_stores(database_url: str, qdrant_url: str) -> None:
+    async def run() -> None:
+        engine = create_async_engine(database_url)
+        async with engine.begin() as connection:
+            await connection.execute(text("DELETE FROM documents"))
+        await engine.dispose()
+        client = AsyncQdrantClient(url=qdrant_url, check_compatibility=False)
+        for collection in (await client.get_collections()).collections:
+            await client.delete_collection(collection.name)
+        await client.close()
+
+    asyncio.run(run())
+
+
+@pytest.fixture
+def clean_stores(migrated_database_url: str, qdrant_url: str) -> Iterator[None]:
+    wipe_stores(migrated_database_url, qdrant_url)
+    yield
+    wipe_stores(migrated_database_url, qdrant_url)

@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
@@ -5,15 +7,20 @@ from fastapi import FastAPI
 
 from app.adapters.base import Resource
 from app.adapters.embedders.base import Embedder, ensure_chunk_fits, ensure_dimension
-from app.adapters.embedders.registry import embedder_registry
+from app.adapters.embedders.registry import build_embedder
 from app.adapters.llm.base import LLMClient
 from app.adapters.llm.registry import llm_registry
+from app.adapters.vector_stores.base import StoreName, VectorStore
+from app.adapters.vector_stores.pgvector import PgVectorStore
+from app.adapters.vector_stores.qdrant import QdrantVectorStore
 from app.api.router import api_router
 from app.core.config import Settings, get_settings
 from app.core.database import Database
 from app.core.errors import register_error_handlers
 from app.core.qdrant import Qdrant
 from app.core.request_id import request_id_middleware
+
+STARTUP_TIMEOUT_SECONDS = 3.0
 
 
 def create_app(
@@ -26,16 +33,19 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         resolved = settings or get_settings()
-        embedder = (
-            embedder_factory() if embedder_factory else embedder_registry.create(resolved.embedder)
-        )
+        embedder = embedder_factory() if embedder_factory else build_embedder(resolved)
         ensure_dimension(embedder)
         ensure_chunk_fits(embedder, resolved.chunk_size)
-        llm = llm_factory() if llm_factory else llm_registry.create(resolved.llm_provider)
+        llm = llm_factory() if llm_factory else llm_registry.create(resolved.llm_provider, resolved)
         database = (
             database_factory(resolved) if database_factory else Database(str(resolved.database_url))
         )
         qdrant = qdrant_factory(resolved) if qdrant_factory else Qdrant(str(resolved.qdrant_url))
+        qdrant_store = QdrantVectorStore(qdrant.client, f"chunks_{embedder.name}", embedder.dim)
+        vector_stores: dict[StoreName, VectorStore] = {
+            "pgvector": PgVectorStore(database),
+            "qdrant": qdrant_store,
+        }
         resources: dict[str, Resource] = {
             "postgres": database,
             "qdrant": qdrant,
@@ -48,7 +58,12 @@ def create_app(
         app.state.database = database
         app.state.qdrant = qdrant
         app.state.resources = resources
+        app.state.vector_stores = vector_stores
+        app.state.index = qdrant_store
         try:
+            with contextlib.suppress(Exception):
+                async with asyncio.timeout(STARTUP_TIMEOUT_SECONDS):
+                    await qdrant_store.ensure_collection()
             yield
         finally:
             for resource in reversed(resources.values()):

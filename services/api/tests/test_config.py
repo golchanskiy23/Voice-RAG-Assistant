@@ -89,6 +89,20 @@ def test_app_refuses_chunk_larger_than_embedder_limit() -> None:
         pass
 
 
+def test_openai_embedder_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EMBEDDER", "openai")
+
+    with pytest.raises(ValidationError, match="OPENAI_API_KEY"):
+        Settings()
+
+
+def test_openai_key_is_hidden(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EMBEDDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-secret")
+
+    assert "sk-secret" not in repr(Settings())
+
+
 def test_rejects_unknown_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "unknown")
 
