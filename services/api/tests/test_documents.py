@@ -189,3 +189,36 @@ def test_missing_file_is_validation_error(client: TestClient) -> None:
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_list_documents(client: TestClient) -> None:
+    upload(client, "guide.md", MARKDOWN)
+
+    response = client.get("/documents", headers=AUTH)
+
+    assert response.status_code == 200
+    [document] = response.json()["documents"]
+    assert document["filename"] == "guide.md"
+    assert document["mime"] == "text/markdown"
+    assert document["chunks"] >= 1
+
+
+def test_delete_document(client: TestClient, repository: InMemoryDocumentRepository) -> None:
+    document_id = upload(client, "guide.md", MARKDOWN).json()["id"]
+
+    response = client.delete(f"/documents/{document_id}", headers=AUTH)
+
+    assert response.status_code == 204
+    assert repository.documents == {}
+    assert client.get("/documents", headers=AUTH).json() == {"documents": []}
+
+
+def test_delete_unknown_document_is_not_found(client: TestClient) -> None:
+    response = client.delete(f"/documents/{uuid.uuid4()}", headers=AUTH)
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"
+
+
+def test_list_requires_admin_key(client: TestClient) -> None:
+    assert client.get("/documents").status_code == 401

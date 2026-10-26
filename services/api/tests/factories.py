@@ -97,6 +97,17 @@ class InMemoryDocumentRepository:
         self._pending = (stored, saved, old)
         return SaveResult(stored, "replaced" if old else "created", saved, [d.id for d in old])
 
+    async def list_all(self) -> list[StoredDocument]:
+        return list(self.documents.values())
+
+    async def delete(self, document_id: uuid.UUID) -> bool:
+        for sha256, document in list(self.documents.items()):
+            if document.id == document_id:
+                del self.documents[sha256]
+                self.chunks.pop(document_id, None)
+                return True
+        return False
+
     async def commit(self) -> None:
         if self._pending is not None:
             stored, saved, old = self._pending

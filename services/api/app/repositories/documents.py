@@ -6,6 +6,7 @@ from typing import Literal, Protocol
 from sqlalchemy import delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.selectable import ScalarSelect
 
 from app.repositories.models import Chunk, Document
 
@@ -63,9 +64,28 @@ class DocumentRepository(Protocol):
 
     async def save(self, document: NewDocument, chunks: Sequence[NewChunk]) -> SaveResult: ...
 
+    async def list_all(self) -> list[StoredDocument]: ...
+
+    async def delete(self, document_id: uuid.UUID) -> bool: ...
+
     async def commit(self) -> None: ...
 
     async def rollback(self) -> None: ...
+
+
+def chunk_count() -> ScalarSelect[int]:
+    return select(func.count(Chunk.id)).where(Chunk.document_id == Document.id).scalar_subquery()
+
+
+def to_stored(document: Document, chunks: int) -> StoredDocument:
+    return StoredDocument(
+        id=document.id,
+        filename=document.filename,
+        sha256=document.sha256,
+        mime=document.mime,
+        pages=document.pages,
+        chunks=chunks,
+    )
 
 
 class SqlDocumentRepository:
@@ -73,25 +93,24 @@ class SqlDocumentRepository:
         self._session = session
 
     async def find_by_sha256(self, sha256: str) -> StoredDocument | None:
-        chunk_count = (
-            select(func.count(Chunk.id)).where(Chunk.document_id == Document.id).scalar_subquery()
-        )
         row = (
             await self._session.execute(
-                select(Document, chunk_count).where(Document.sha256 == sha256)
+                select(Document, chunk_count()).where(Document.sha256 == sha256)
             )
         ).one_or_none()
-        if row is None:
-            return None
-        document, chunks = row
-        return StoredDocument(
-            id=document.id,
-            filename=document.filename,
-            sha256=document.sha256,
-            mime=document.mime,
-            pages=document.pages,
-            chunks=chunks,
+        return None if row is None else to_stored(*row)
+
+    async def list_all(self) -> list[StoredDocument]:
+        rows = await self._session.execute(
+            select(Document, chunk_count()).order_by(Document.created_at, Document.filename)
         )
+        return [to_stored(document, chunks) for document, chunks in rows]
+
+    async def delete(self, document_id: uuid.UUID) -> bool:
+        deleted = await self._session.scalar(
+            delete(Document).where(Document.id == document_id).returning(Document.id)
+        )
+        return deleted is not None
 
     async def save(self, document: NewDocument, chunks: Sequence[NewChunk]) -> SaveResult:
         inserted = await self._session.scalar(

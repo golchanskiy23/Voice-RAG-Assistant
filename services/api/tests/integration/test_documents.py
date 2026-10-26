@@ -192,3 +192,23 @@ def test_concurrent_saves_of_same_file_create_one_document(migrated_database_url
 
     assert sorted(statuses) == ["created"] + ["exists"] * 9
     assert chunk_count == [(1,)]
+
+
+def test_list_and_delete_remove_document_from_both_stores(
+    settings: Settings, migrated_database_url: str
+) -> None:
+    auth = {API_KEY_HEADER: TEST_ADMIN_API_KEY}
+    with TestClient(create_app(settings=settings)) as client:
+        kept = upload(client, "kept.md", MARKDOWN).json()
+        removed = upload(client, "removed.pdf", PDF).json()
+        listed = client.get("/documents", headers=auth).json()["documents"]
+        deleted = client.delete(f"/documents/{removed['id']}", headers=auth)
+        search = client.post("/search", json={"query": "регламент документов", "k": 10})
+        missing = client.delete(f"/documents/{removed['id']}", headers=auth)
+
+    assert [d["filename"] for d in listed] == ["kept.md", "removed.pdf"]
+    assert listed[1]["pages"] == removed["pages"]
+    assert (deleted.status_code, missing.status_code) == (204, 404)
+    assert {c["document_id"] for c in search.json()["chunks"]} <= {kept["id"]}
+    chunk_documents = query(migrated_database_url, select(Chunk.document_id).distinct())
+    assert [str(r[0]) for r in chunk_documents] == [kept["id"]]
