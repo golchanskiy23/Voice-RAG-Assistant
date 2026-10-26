@@ -1,4 +1,5 @@
 from app.adapters.llm.base import LLMClient
+from app.adapters.llm.claude_code import ClaudeCodeLLMClient
 from app.adapters.llm.fallback import FallbackLLMClient
 from app.adapters.llm.gigachat import GigaChatLLMClient
 from app.adapters.llm.openai import OpenAILLMClient
@@ -30,10 +31,21 @@ def gigachat_llm(settings: Settings) -> GigaChatLLMClient:
     )
 
 
+def claude_code_llm(settings: Settings) -> ClaudeCodeLLMClient:
+    return ClaudeCodeLLMClient(
+        binary=settings.claude_code_bin,
+        model=settings.claude_code_model,
+        effort=settings.claude_code_effort,
+        timeout=settings.claude_code_timeout,
+        concurrency=settings.claude_code_concurrency,
+    )
+
+
 llm_registry: Registry[Settings, LLMClient] = Registry("llm")
 llm_registry.register("stub", lambda s: StubLLMClient(token_delay=s.stub_llm_token_delay))
 llm_registry.register("openai", openai_llm)
 llm_registry.register("gigachat", gigachat_llm)
+llm_registry.register("claude-code", claude_code_llm)
 
 
 def build_llm(settings: Settings) -> LLMClient:

@@ -4,7 +4,10 @@ x-database-url: &database-url postgresql+asyncpg://${POSTGRES_USER:-rag}:${POSTG
 
 services:
   api:
-    build: ./services/api
+    build:
+      context: ./services/api
+      args:
+        WITH_CLAUDE_CODE: ${WITH_CLAUDE_CODE:-0}
     image: voice-rag-api:local
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
@@ -15,6 +18,10 @@ services:
       GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-2}
       GIGACHAT_VERIFY_SSL: ${GIGACHAT_VERIFY_SSL:-true}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-30}
+      CLAUDE_CODE_OAUTH_TOKEN:
+      CLAUDE_CODE_MODEL: ${CLAUDE_CODE_MODEL:-sonnet}
+      CLAUDE_CODE_EFFORT: ${CLAUDE_CODE_EFFORT:-low}
+      CLAUDE_CODE_TIMEOUT: ${CLAUDE_CODE_TIMEOUT:-120}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-512}
       PROMPT_VERSION: ${PROMPT_VERSION:-v2}
       RAG_TOP_K: ${RAG_TOP_K:-5}
@@ -50,6 +57,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       TELEGRAM_TOKEN:
       TELEGRAM_SECRET:
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-webhook}
       TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
       TELEGRAM_WHITELIST: ${TELEGRAM_WHITELIST:-}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}

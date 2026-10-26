@@ -51,10 +51,10 @@ def build_dialog_store(settings: Settings) -> DialogStore:
 
 async def start_telegram(app: FastAPI, settings: Settings) -> Any:
     from app.adapters.telegram.aiogram import AiogramGateway, AiogramMessenger, create_bot
-    from app.api.deps import dialog_service_from_state
+    from app.api.deps import StateLibrary, dialog_service_from_state
     from app.services.telegram import TelegramBot
 
-    assert settings.telegram_token is not None and settings.telegram_secret is not None
+    assert settings.telegram_token is not None
     bot = create_bot(settings.telegram_token.get_secret_value())
     service = TelegramBot(
         AiogramMessenger(bot),
@@ -65,9 +65,13 @@ async def start_telegram(app: FastAPI, settings: Settings) -> Any:
         whitelist=settings.telegram_chat_whitelist,
         rate_limit=settings.telegram_rate_limit,
         max_voice_seconds=settings.telegram_max_voice_seconds,
+        library=StateLibrary(app.state),
     )
     gateway = AiogramGateway(bot, service)
-    if settings.telegram_webhook_url:
+    if settings.telegram_mode == "polling":
+        gateway.start_polling()
+        log.info("telegram_polling_started", stage="telegram")
+    elif settings.telegram_webhook_url and settings.telegram_secret is not None:
         try:
             await gateway.set_webhook(
                 settings.telegram_webhook_url, settings.telegram_secret.get_secret_value()
@@ -169,12 +173,12 @@ def create_app(
         resources["redis" if resolved.redis_url else "dialog"] = dialog_store
         app.state.dialog_store = dialog_store
         app.state.rewrite_prompt = load_rewrite_prompt(resolved.prompts_dir)
+        app.state.prompt = prompt
+        app.state.count_tokens = count_tokens
         app.state.telegram = None
         if resolved.telegram_token is not None:
             app.state.telegram = await start_telegram(app, resolved)
             resources["telegram"] = app.state.telegram
-        app.state.prompt = prompt
-        app.state.count_tokens = count_tokens
         try:
             with contextlib.suppress(Exception):
                 async with asyncio.timeout(STARTUP_TIMEOUT_SECONDS):

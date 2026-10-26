@@ -1,4 +1,5 @@
 from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 from fastapi import Depends, Request
@@ -11,11 +12,15 @@ from app.adapters.rerankers.base import Reranker
 from app.adapters.vector_stores.base import StoreName, VectorStore
 from app.core.config import Settings
 from app.core.database import Database
-from app.repositories.documents import DocumentRepository, SqlDocumentRepository
+from app.repositories.documents import (
+    DocumentRepository,
+    SqlDocumentRepository,
+    StoredDocument,
+)
 from app.repositories.fulltext import KeywordIndex
 from app.services.chunking import Chunker
 from app.services.dialog import DialogService, NoRewrite, QueryRewriter
-from app.services.ingestion import IngestionService
+from app.services.ingestion import IngestionService, UploadResult
 from app.services.prompts import AnswerPrompt
 from app.services.rag import RAGService, RAGSettings
 from app.services.search import SearchDefaults, SearchService
@@ -170,6 +175,29 @@ def dialog_service_from_state(state: Any) -> DialogService:
     settings: Settings = state.settings
     rewriter = QueryRewriter(state.llm, state.rewrite_prompt) if settings.rewrite_enabled else None
     return DialogService(state.dialog_store, rewriter or NoRewrite(), rag_service_from_state(state))
+
+
+@asynccontextmanager
+async def ingestion_from_state(state: Any) -> AsyncIterator[IngestionService]:
+    settings: Settings = state.settings
+    database: Database = state.database
+    embedder: Embedder = state.embedder
+    chunker = Chunker(embedder.count_tokens, settings.chunk_size, settings.chunk_overlap)
+    async with database.sessionmaker() as session:
+        yield IngestionService(SqlDocumentRepository(session), embedder, chunker, state.index)
+
+
+class StateLibrary:
+    def __init__(self, state: Any) -> None:
+        self._state = state
+
+    async def upload(self, filename: str, content: bytes) -> UploadResult:
+        async with ingestion_from_state(self._state) as service:
+            return await service.upload(filename, content)
+
+    async def list_documents(self) -> list[StoredDocument]:
+        async with ingestion_from_state(self._state) as service:
+            return await service.list_documents()
 
 
 def get_dialog_service(request: Request) -> DialogService:

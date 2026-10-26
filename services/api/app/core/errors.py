@@ -5,6 +5,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.adapters.llm.base import LLMError
+
 STATUS_CODES: dict[int, str] = {
     400: "bad_request",
     401: "unauthorized",
@@ -54,6 +56,12 @@ async def handle_validation_error(request: Request, exc: Exception) -> JSONRespo
     return error_response(request, 422, "validation_error", message)
 
 
+async def handle_llm_error(request: Request, exc: Exception) -> JSONResponse:
+    assert isinstance(exc, LLMError)
+    message = f"LLM-провайдер {exc.provider} недоступен, попробуйте позже"
+    return error_response(request, 503, "llm_unavailable", message)
+
+
 async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
     return error_response(request, 500, "internal_error", "Внутренняя ошибка сервера")
 
@@ -62,4 +70,5 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(AppError, handle_app_error)
     app.add_exception_handler(StarletteHTTPException, handle_http_error)
     app.add_exception_handler(RequestValidationError, handle_validation_error)
+    app.add_exception_handler(LLMError, handle_llm_error)
     app.add_exception_handler(Exception, handle_unexpected_error)

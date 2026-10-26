@@ -19,12 +19,22 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.12-slim
 
+ARG WITH_CLAUDE_CODE=0
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
+        $([ "$WITH_CLAUDE_CODE" = "1" ] && echo "curl ca-certificates") \
     && rm -rf /var/lib/apt/lists/*
 
+RUN if [ "$WITH_CLAUDE_CODE" = "1" ]; then \
+        export HOME=/tmp/claude-install \
+        && curl -fsSL https://claude.ai/install.sh | bash \
+        && cp -L "$HOME/.local/bin/claude" /usr/local/bin/claude \
+        && rm -rf "$HOME"; \
+    fi
+
 RUN groupadd --system --gid 1000 app \
-    && useradd --system --uid 1000 --gid app --no-create-home app
+    && useradd --system --uid 1000 --gid app --create-home --home-dir /home/app app
 
 WORKDIR /app
 
@@ -35,6 +45,8 @@ COPY --chown=app:app prompts ./prompts
 COPY --chown=app:app app ./app
 
 ENV PATH="/app/.venv/bin:$PATH" \
+    HOME=/home/app \
+    DISABLE_AUTOUPDATER=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TIKTOKEN_CACHE_DIR=/app/.tiktoken

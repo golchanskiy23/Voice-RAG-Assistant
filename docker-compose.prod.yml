@@ -13,6 +13,7 @@ services:
       context: ./services/api
       args:
         WITH_LOCAL_MODELS: ${WITH_LOCAL_MODELS:-0}
+        WITH_CLAUDE_CODE: ${WITH_CLAUDE_CODE:-0}
     ports: !reset []
     environment:
       TELEGRAM_WEBHOOK_URL: https://${DOMAIN}/telegram/webhook

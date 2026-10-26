@@ -17,8 +17,9 @@ RAG реализован вручную, без LangChain, LlamaIndex и под�
 | Поиск: recall@5 / MRR | 44 вопроса по 8 демо-документам (корпус удалён), `eval_retrieval.py` | вектор 0.795 / 0.705 → **BM25 0.955 / 0.911**, гибрид 0.909 / 0.837 |
 | Поиск: задержка p95 | тот же прогон | 6.7 мс (BM25) |
 | Первый звук голосового ответа, p95 | 50 запросов через WebSocket, **симуляция**: stub LLM 30 мс/токен, stub TTS RTF 0.15 | 2 828 → **1 585 мс** (−44%): синтез по предложениям + короткий первый фрагмент |
-| Тесты | `pytest` | 282 unit + 33 интеграционных (Postgres, Qdrant в testcontainers) |
-| С реальными моделями | — | не измерено: recall для e5 / BGE-M3 / OpenAI, reranker, WER/RTF whisper, p95 с Silero, ответы LLM на 14 регрессионных вопросах |
+| Ответы LLM: регрессия промпта | 14 вопросов `pytest -m llm` (8 по базе, 6 вне базы), Claude Sonnet через `claude-code` | **14 / 14**: нужный документ в источниках, отказ на всех вопросах вне базы |
+| Тесты | `pytest` | 304 unit + 34 интеграционных (Postgres, Qdrant в testcontainers) |
+| С реальными моделями | — | не измерено: recall для e5 / BGE-M3 / OpenAI, reranker, WER/RTF whisper, p95 с Silero |
 
 Оговорки: вопросы eval написаны по тексту документов — это завышает BM25; эмбеддер в baseline — `hashing` без модели.
 Подробности и разбор промахов — «Оценка качества» и «Голос».
@@ -128,6 +129,59 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 # {"id":"...","chunks":3,"pages":null,"status":"created"}
 ```
 
+## Локально: Telegram-бот + Claude Code
+
+Сценарий «всё на своей машине»: документы и вопросы — в Telegram, ответы генерирует Claude через
+установленный [Claude Code](https://claude.com/claude-code) (подписка, без API-ключа). Публичный адрес не нужен —
+бот работает в режиме long polling.
+
+1. Создать бота у [@BotFather](https://t.me/BotFather) и получить токен.
+2. Получить долгоживущий токен Claude Code для контейнера: `claude setup-token` (откроет браузер для входа).
+3. Заполнить `.env` в корне:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   ```dotenv
+   LLM_PROVIDER=claude-code
+   WITH_CLAUDE_CODE=1                 # поставить Claude Code CLI в образ api
+   CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...
+   CLAUDE_CODE_MODEL=sonnet           # или haiku — быстрее, opus — точнее
+   TELEGRAM_TOKEN=123456:ABC...
+   TELEGRAM_MODE=polling
+   TELEGRAM_WHITELIST=                # chat_id через запятую; бот подскажет ваш при первой загрузке файла
+   ```
+
+4. Запустить и написать боту `/start`:
+
+   ```bash
+   docker compose up -d --build --wait
+   docker compose logs -f api         # telegram_polling_started — бот слушает
+   ```
+
+5. Отправить боту PDF или Markdown файлом — без whitelist бот откажет и пришлёт ваш `chat_id`; вписать его в
+   `TELEGRAM_WHITELIST` и перезапустить: `docker compose up -d --wait`. После этого файл индексируется, подпись к
+   файлу считается вопросом. Дальше — вопросы текстом (голосом — при `STT=faster-whisper`), `/docs` — список
+   документов, `/reset` — забыть историю.
+
+Ответ занимает ~3–6 с: Claude Code запускается отдельным процессом на каждый вызов LLM (переформулировка
+уточняющего вопроса + ответ). Расход — из лимитов вашей подписки Claude. Без Docker-сборки CLI можно запустить
+api прямо на хосте, где Claude Code уже залогинен:
+
+```bash
+docker compose up -d --wait postgres qdrant redis migrate
+docker compose stop api
+cd services/api && set -a && . ../../.env && set +a
+DATABASE_URL=postgresql+asyncpg://rag:rag@localhost:5433/rag QDRANT_URL=http://localhost:6334 \
+REDIS_URL=redis://localhost:6380/0 uv run uvicorn app.main:app --port 8000
+```
+
+Качество поиска без моделей ограничено: по умолчанию `SEARCH_MODE=bm25` и `EMBEDDER=hashing`. Если поиск не
+находит нужный фрагмент, Claude честно отвечает «В документах нет ответа». Лучше — `EMBEDDER=openai` (ключ) или
+`EMBEDDER=e5` + `SEARCH_MODE=hybrid` (сборка `WITH_LOCAL_MODELS=1`, нужна RAM); после смены эмбеддера документы
+нужно загрузить заново.
+
 ## API
 
 | Метод | Путь | Назначение | Статус |
@@ -137,8 +191,8 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | POST | `/documents` | Загрузить PDF/Markdown до 20 МБ (API-ключ в `X-API-Key`): парсинг, чанкинг, эмбеддинги, запись чанков в Postgres (+ pgvector) и Qdrant; тот же файл → тот же `id`, новая версия с тем же именем заменяет старую | ✅ |
 | POST | `/ask` | Ответ целиком: `{answer, sources: [{filename, page, section, quote}], confidence, latency}`; с `session_id` — с историей диалога ([`contracts/http-api.md`](contracts/http-api.md)) | ✅ |
 | POST | `/ask/stream` | SSE: `token` (текст ответа), `sources` (источники и confidence), `done` (latency), `error` | ✅ |
-| GET | `/documents` | Список документов | план |
-| DELETE | `/documents/{id}` | Удалить документ и его чанки | план |
+| GET | `/documents` | Список документов `{documents: [{id, filename, mime, pages, chunks}]}` (API-ключ) | ✅ |
+| DELETE | `/documents/{id}` | Удалить документ и его чанки из Postgres и Qdrant → 204, неизвестный id → 404 (API-ключ) | ✅ |
 | POST | `/search` | Поиск top-k чанков: `{query, k, doc_ids?, mode?: vector\|bm25\|hybrid, store?, rerank?}` → `{chunks: [{id, document_id, filename, ord, text, page, section, score, source, found_by}], store, mode, reranked, latency}` | ✅ |
 | WS | `/ws/voice` | PCM 16 кГц / ogg / wav или текст → `partial_transcript`, `final_transcript`, `answer_text`, `audio_chunk`, `sources`, `done`, `interrupted` — контракт в [`contracts/ws-voice.md`](contracts/ws-voice.md) | ✅ |
 | POST | `/telegram/webhook` | Обновления Telegram: проверка `X-Telegram-Bot-Api-Secret-Token`, дедуп по `update_id`, обработка в фоне | ✅ |
@@ -153,7 +207,11 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | Переменная | По умолчанию в compose | Назначение |
 |------------|------------------------|------------|
 | `ADMIN_API_KEY` | `dev-admin-key` | Ключ для `/documents` |
-| `LLM_PROVIDER` | `stub` | LLM: `openai`, `gigachat` или `stub` — без сети, цитирует первый найденный чанк (для разработки) |
+| `LLM_PROVIDER` | `stub` | LLM: `openai`, `gigachat`, `claude-code` — Claude через CLI Claude Code (подписка) или `stub` — без сети, цитирует первый найденный чанк (для разработки) |
+| `CLAUDE_CODE_OAUTH_TOKEN` | — | Токен из `claude setup-token` для CLI в контейнере; на хосте не нужен, если Claude Code залогинен |
+| `CLAUDE_CODE_MODEL`, `CLAUDE_CODE_EFFORT` | `sonnet`, `low` | Модель (`haiku`, `sonnet`, `opus` или полное имя) и effort для `claude-code` |
+| `CLAUDE_CODE_TIMEOUT`, `CLAUDE_CODE_CONCURRENCY` | `120`, `2` | Таймаут вызова CLI, с; сколько процессов CLI одновременно |
+| `WITH_CLAUDE_CODE` | `0` | Аргумент сборки: `1` — поставить Claude Code CLI в образ api |
 | `LLM_FALLBACK` | — | Второй провайдер: при ошибке первого (после ретраев) запрос уходит ему |
 | `OPENAI_LLM_MODEL` | `gpt-4o-mini` | Модель OpenAI для ответа (нужна поддержка strict JSON Schema) |
 | `GIGACHAT_CREDENTIALS` | — | Authorization key GigaChat (base64 `client_id:client_secret`), обязателен для `gigachat` |
@@ -173,8 +231,9 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 | `DIALOG_MAX_TURNS`, `DIALOG_TTL_SECONDS` | `10`, `86400` | Сколько реплик хранить и сколько живёт история |
 | `REWRITE_ENABLED` | `true` | Переформулировать уточняющий вопрос LLM перед поиском (промпт `prompts/rewrite/v1/`) |
 | `TELEGRAM_TOKEN`, `TELEGRAM_SECRET` | — | Токен бота и секрет вебхука; без токена бот выключен |
+| `TELEGRAM_MODE` | `webhook` | `webhook` — обновления через `POST /telegram/webhook` (prod, нужен HTTPS); `polling` — бот сам забирает обновления, для локального запуска, секрет не нужен |
 | `TELEGRAM_WEBHOOK_URL` | — | Если задан — вебхук регистрируется при старте (в prod: `https://$DOMAIN/telegram/webhook`) |
-| `TELEGRAM_WHITELIST`, `TELEGRAM_RATE_LIMIT` | —, `10` | chat_id через запятую (пусто — все); вопросов в минуту на пользователя |
+| `TELEGRAM_WHITELIST`, `TELEGRAM_RATE_LIMIT` | —, `10` | chat_id через запятую (пусто — вопросы от всех, загрузка документов ни от кого); вопросов в минуту на пользователя |
 | `LOG_LEVEL` | `INFO` | Уровень логов; текст вопроса пишется только на `DEBUG` |
 | `EMBEDDER` | `hashing` | Эмбеддер: `hashing` — feature hashing без модели, для разработки; `openai` — OpenAI embeddings; `e5`, `bge-m3` — локально через transformers (группа `local-models`) |
 | `EMBEDDER_DEVICE`, `RERANKER_DEVICE` | `cpu` | Устройство для локальных моделей (`cpu`, `cuda`) |
@@ -292,8 +351,10 @@ PYTHONPATH=. uv run python scripts/bench_vector_stores.py   # нужен docker 
 - **Стриминг** — модель стримит JSON, сервис на лету вынимает из него значение `answer` и шлёт событиями `token`;
   после конца стрима JSON валидируется и уходит событием `sources`.
 - **LLM за интерфейсом** — `LLMClient` (`complete`, `stream`): OpenAI (ретраи с backoff на 429/5xx/таймаутах),
-  GigaChat (OAuth-токен обновляет SDK), `FallbackLLMClient` (переключение на второго провайдера; в стриме — только
-  до первого токена).
+  GigaChat (OAuth-токен обновляет SDK), Claude Code (`claude --print --output-format json --json-schema …` в
+  отдельном процессе: инструменты, MCP, настройки и сессии отключены, ответ берётся из `structured_output`; стрим —
+  весь ответ одним событием, поэтому для голоса он медленнее API-провайдеров), `FallbackLLMClient` (переключение
+  на второго провайдера; в стриме — только до первого токена).
 - **Логи** — JSON (structlog) на каждый запрос: `request_id`, `chunk_ids`, `sources`, `provider`, `prompt_version`,
   `prompt_tokens`/`completion_tokens`, `latency_ms` по этапам (`embed`, `search`, `first_token`, `llm`, `total`).
 
@@ -303,8 +364,9 @@ curl -N localhost:8000/ask/stream -H 'Content-Type: application/json' -d '{"ques
 ```
 
 Бюджет контекста на этом вопросе (top-5, токенизатор `o200k_base`): system 250 + вопрос 13 + чанки 1 109 + служебные 11
-+ ответ до 512 = 1 895 токенов. Качество ответов с реальной LLM (верный документ на 5 вопросах, отказ вне базы) ещё
-не измерено: проверено только с `stub` и на тестах с замоканной LLM.
++ ответ до 512 = 1 895 токенов. Ручная проверка с `claude-code` (Sonnet, BM25 + `hashing`, корпус — `docs/` и
+фикстуры): на 3 вопросах по базе ответ верный со ссылкой на нужный файл, LLM 3.5–4.3 с; вопрос вне базы («Как
+приготовить борщ?») — отказ. Систематический замер на eval-датасете с реальной LLM не проводился.
 
 ## Гибридный поиск
 
@@ -364,12 +426,21 @@ TTL 1 ч) → ответ 200 сразу, обработка в фоне (Telegra
 
 - **Текст** → история диалога → переформулировка → RAG → ответ с источниками (HTML).
 - **Голосовое** (ogg/opus) → скачать → ffmpeg → STT → то же → ответ текстом и голосом (`sendVoice`, opus 32 кбит/с).
+- **Файл** (PDF/Markdown до 20 МБ) → скачать → тот же конвейер, что `POST /documents` (дедуп по SHA-256, новая
+  версия с тем же именем заменяет старую) → «добавлен в базу (страниц, фрагментов)»; подпись к файлу — вопрос.
+  Только для чатов из `TELEGRAM_WHITELIST`: иначе бот отвечает отказом с вашим `chat_id`. `/docs` — список документов.
+- **Режимы** — `TELEGRAM_MODE=webhook` (prod, по ТЗ FR-6.1) или `polling` для локального запуска без публичного
+  адреса: aiogram сам опрашивает `getUpdates`, перед стартом снимает вебхук; `/telegram/webhook` в этом режиме — 404.
 - **Диалог** — история по `chat_id` в Redis (список, `LTRIM` до `DIALOG_MAX_TURNS`, TTL 24 ч), `/reset` очищает.
   Уточняющий вопрос («а сколько это стоит?») LLM переписывает в самостоятельный («Сколько стоит ДМС для
   родственников?») по последним репликам; при ошибке LLM ищется исходный вопрос. С `stub`-LLM вместо
   переформулировки — склейка с прошлым вопросом.
 - **Защита** — whitelist `chat_id`, rate limit 10 вопросов в минуту на пользователя (`INCR` + `EXPIRE`),
   голосовые длиннее 60 с отклоняются; индикатор «печатает…» / «записывает голосовое…» обновляется каждые 4 с.
+
+Если LLM недоступна (нет входа в Claude Code, лимит, сеть), бот отвечает «Модель сейчас недоступна», `/ask` — 503
+`llm_unavailable`. Ошибка polling (неверный токен) не роняет api: она в логе `telegram_polling_failed`, а `/ready`
+показывает `telegram: false`.
 
 Логика бота (`app/services/telegram.py`) отделена от aiogram интерфейсом `Messenger` и тестируется без сети;
 маршрутизация aiogram проверяется на фейковой HTTP-сессии бота. Живого бота в этой работе не запускал — нет токена.
@@ -420,6 +491,7 @@ uvx pre-commit run --all-files
 
 ```bash
 cd services/api
+uv run python scripts/index.py ../../data/            # индексировать папку через запущенный api (API_URL, ADMIN_API_KEY)
 uv run python scripts/eval_retrieval.py --config <name>   # recall@1/3/5, MRR
 uv run python scripts/eval_latency.py                     # p50/p95 по этапам
 ```
@@ -467,7 +539,7 @@ Baseline: эмбеддер `hashing`, Qdrant, чанк 300 / перекрыти�
 | Задержка до первого звука, p95 | ≤ 2.5 с | — (на симуляции без моделей 1.58 с, см. «Голос») |
 | Задержка до первого токена, p95 | ≤ 1.5 с | — |
 | Поиск (retrieve + rerank), p95 | ≤ 300 мс | 6.7 мс (BM25, без reranker, 52 чанка) |
-| Выдуманные ответы на вопросы вне базы | 0 | — |
+| Выдуманные ответы на вопросы вне базы | 0 | 0 из 6 (Claude Sonnet через `claude-code`, `pytest -m llm`) |
 
 Таблицы заполняются только реально измеренными значениями.
 

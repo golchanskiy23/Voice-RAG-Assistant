@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 from typing import Any
 
 import structlog
@@ -46,6 +48,23 @@ def build_router(service: TelegramBot) -> Router:
     async def reset(message: Message) -> None:
         await service.on_reset(message.chat.id)
 
+    @router.message(Command("docs"))
+    async def docs(message: Message) -> None:
+        await service.on_docs(message.chat.id)
+
+    @router.message(F.document)
+    async def document(message: Message) -> None:
+        assert message.document is not None
+        user_id = message.from_user.id if message.from_user else message.chat.id
+        await service.on_document(
+            message.chat.id,
+            user_id,
+            message.document.file_id,
+            message.document.file_name or "document",
+            message.document.file_size,
+            message.caption,
+        )
+
     @router.message(F.voice)
     async def voice(message: Message) -> None:
         assert message.voice is not None
@@ -71,6 +90,7 @@ class AiogramGateway:
         self._bot = bot
         self._dispatcher = Dispatcher()
         self._dispatcher.include_router(build_router(service))
+        self._polling: asyncio.Task[None] | None = None
 
     async def process(self, payload: dict[str, Any]) -> None:
         update = Update.model_validate(payload, context={"bot": self._bot})
@@ -79,8 +99,27 @@ class AiogramGateway:
     async def set_webhook(self, url: str, secret: str) -> None:
         await self._bot.set_webhook(url, secret_token=secret, allowed_updates=["message"])
 
+    def start_polling(self) -> None:
+        self._polling = asyncio.create_task(self._poll())
+
+    async def _poll(self) -> None:
+        try:
+            await self._bot.delete_webhook()
+            await self._dispatcher.start_polling(
+                self._bot,
+                handle_signals=False,
+                close_bot_session=False,
+                allowed_updates=["message"],
+            )
+        except Exception:
+            log.exception("telegram_polling_failed", stage="telegram")
+
     async def is_ready(self) -> bool:
-        return True
+        return self._polling is None or not self._polling.done()
 
     async def close(self) -> None:
+        if self._polling is not None:
+            self._polling.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._polling
         await self._bot.session.close()

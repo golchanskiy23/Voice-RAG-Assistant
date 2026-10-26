@@ -35,9 +35,10 @@ async def process_safely(processor: UpdateProcessor, payload: dict[str, Any]) ->
 async def webhook(request: Request) -> dict[str, bool]:
     state = request.app.state
     processor: UpdateProcessor | None = state.telegram
-    if processor is None:
+    secret = state.settings.telegram_secret
+    if processor is None or state.settings.telegram_mode != "webhook" or secret is None:
         raise AppError("not_found", "Telegram-бот не настроен", status_code=404)
-    expected: str = state.settings.telegram_secret.get_secret_value()
+    expected: str = secret.get_secret_value()
     received = request.headers.get(SECRET_HEADER, "")
     if not hmac.compare_digest(received.encode(), expected.encode()):
         raise AppError("unauthorized", "Неверный secret token", status_code=401)

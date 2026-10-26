@@ -29,7 +29,7 @@ def test_each_create_returns_new_instance() -> None:
 def test_unknown_name_lists_available() -> None:
     with pytest.raises(
         UnknownAdapterError,
-        match=r"llm: неизвестная реализация 'gpt'.*\['gigachat', 'openai', 'stub'\]",
+        match=r"llm: неизвестная реализация 'gpt'.*\['claude-code', 'gigachat', 'openai', 'stub'\]",
     ):
         llm_registry.create("gpt", make_settings())
 
