@@ -66,6 +66,7 @@ async def start_telegram(app: FastAPI, settings: Settings) -> Any:
         rate_limit=settings.telegram_rate_limit,
         max_voice_seconds=settings.telegram_max_voice_seconds,
         library=StateLibrary(app.state),
+        voice_reply=settings.telegram_voice_reply,
     )
     gateway = AiogramGateway(bot, service)
     if settings.telegram_mode == "polling":

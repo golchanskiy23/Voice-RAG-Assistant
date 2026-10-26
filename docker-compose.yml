@@ -8,6 +8,7 @@ services:
       context: ./services/api
       args:
         WITH_CLAUDE_CODE: ${WITH_CLAUDE_CODE:-0}
+        WITH_STT: ${WITH_STT:-0}
     image: voice-rag-api:local
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
@@ -29,7 +30,8 @@ services:
       RAG_CONTEXT_TOKENS: ${RAG_CONTEXT_TOKENS:-3000}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       STT: ${STT:-stub}
-      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-2}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       VAD: ${VAD:-energy}
       VAD_MIN_SILENCE_MS: ${VAD_MIN_SILENCE_MS:-600}
@@ -60,9 +62,13 @@ services:
       TELEGRAM_MODE: ${TELEGRAM_MODE:-webhook}
       TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
       TELEGRAM_WHITELIST: ${TELEGRAM_WHITELIST:-}
+      TELEGRAM_VOICE_REPLY: ${TELEGRAM_VOICE_REPLY:-true}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
     ports:
       - "${API_PORT:-8000}:8000"
+    volumes:
+      - models:/models
+    mem_limit: ${API_MEMORY:-1536m}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -132,6 +138,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  models:
   postgres-data:
   qdrant-data:
   redis-data:

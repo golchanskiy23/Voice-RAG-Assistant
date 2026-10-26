@@ -151,6 +151,11 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
    TELEGRAM_TOKEN=123456:ABC...
    TELEGRAM_MODE=polling
    TELEGRAM_WHITELIST=                # chat_id через запятую; бот подскажет ваш при первой загрузке файла
+   # вопросы голосом: распознавание faster-whisper base на CPU, ответ текстом
+   WITH_STT=1                         # только faster-whisper в образе, без PyTorch
+   STT=faster-whisper
+   WHISPER_MODEL=base
+   TELEGRAM_VOICE_REPLY=false         # голосовой ответ (Silero TTS) слабому ноутбуку не по силам
    ```
 
 4. Запустить и написать боту `/start`:
@@ -162,8 +167,13 @@ curl -X POST localhost:8000/documents -H 'X-API-Key: dev-admin-key' -F file=@gui
 
 5. Отправить боту PDF или Markdown файлом — без whitelist бот откажет и пришлёт ваш `chat_id`; вписать его в
    `TELEGRAM_WHITELIST` и перезапустить: `docker compose up -d --wait`. После этого файл индексируется, подпись к
-   файлу считается вопросом. Дальше — вопросы текстом (голосом — при `STT=faster-whisper`), `/docs` — список
-   документов, `/reset` — забыть историю.
+   файлу считается вопросом. Дальше — вопросы текстом или голосовым: бот покажет «🎤 распознанный текст» и ответит
+   текстом. `/docs` — список документов, `/reset` — забыть историю.
+
+Голос: модель `base` (int8, `WHISPER_CPU_THREADS=2`) — выбрана под ноутбук i5-4300U / 7.5 ГБ: ~0.3–0.4 ГБ RAM,
+оценка — пара секунд на фразу (оценка по характеристикам, не замер). Веса (~145 МБ) скачиваются при первом старте
+в volume `models`. Контейнер api ограничен `API_MEMORY` (по умолчанию 1536m) — нехватка памяти перезапустит
+контейнер, а не подвесит машину. На машине мощнее — `WHISPER_MODEL=small`: точнее, но ~1 ГБ RAM.
 
 Ответ занимает ~3–6 с: Claude Code запускается отдельным процессом на каждый вызов LLM (переформулировка
 уточняющего вопроса + ответ). Расход — из лимитов вашей подписки Claude. Без Docker-сборки CLI можно запустить
@@ -223,7 +233,11 @@ REDIS_URL=redis://localhost:6380/0 uv run uvicorn app.main:app --port 8000
 | `RAG_MIN_SCORE` | `0.0` | Порог score: если ни один чанк не прошёл — отказ без вызова LLM |
 | `RAG_CONTEXT_TOKENS` | `3000` | Бюджет токенов на чанки в промпте; не поместившиеся отбрасываются с конца |
 | `STT` | `stub` | `faster-whisper` (группа `local-models`) или `stub` — без модели, возвращает фиксированный текст |
-| `WHISPER_MODEL`, `WHISPER_COMPUTE_TYPE` | `small`, `int8` | Модель и квантование faster-whisper (`float16` на GPU) |
+| `WHISPER_MODEL`, `WHISPER_COMPUTE_TYPE` | `base`, `int8` | Модель и квантование faster-whisper (`float16` на GPU) |
+| `WHISPER_CPU_THREADS` | `2` | Потоков CPU на распознавание; `0` — все |
+| `WITH_STT` | `0` | Аргумент сборки: `1` — поставить в образ только faster-whisper (без PyTorch) |
+| `TELEGRAM_VOICE_REPLY` | `true` | `false` — на голосовое бот отвечает только текстом, без синтеза речи |
+| `API_MEMORY` | `1536m` (prod `2560m`) | Лимит памяти контейнера api |
 | `VAD`, `VAD_MIN_SILENCE_MS` | `energy`, `600` | Детектор речи: `energy` (RMS, без модели) или `silero`; тишина, после которой фраза закончена |
 | `TTS`, `TTS_SPEAKER`, `TTS_SAMPLE_RATE` | `stub`, `xenia`, `24000` | Синтез: `silero` (v4_ru, группа `local-models`) или `stub` — тон вместо речи |
 | `VOICE_STREAMING`, `VOICE_FIRST_CHUNK_CHARS` | `true`, `80` | Синтез по предложениям по мере генерации; первый фрагмент режется по запятой до N символов |

@@ -75,6 +75,7 @@ def make_bot(
     rate_limit: int = 10,
     library: FakeLibrary | None = None,
     llm: ScriptedLLM | None = None,
+    voice_reply: bool = True,
 ) -> TelegramBot:
     llm = llm or ScriptedLLM([ANSWER] * 20)
     store = InMemoryDialogStore()
@@ -92,6 +93,7 @@ def make_bot(
         whitelist,
         rate_limit,
         library=library,
+        voice_reply=voice_reply,
     )
 
 
@@ -159,6 +161,18 @@ def test_voice_message_gets_text_and_voice_reply() -> None:
     [(_, ogg)] = messenger.voices
     assert ogg[:4] == b"OggS"
     assert messenger.actions[0] == "record_voice"
+
+
+def test_voice_question_gets_text_only_reply_when_voice_reply_off() -> None:
+    messenger = FakeMessenger(voice=tone_ogg())
+
+    asyncio.run(make_bot(messenger, voice_reply=False).on_voice(1, 1, "file-1", duration=1))
+
+    [(_, text)] = messenger.texts
+    assert text.startswith("🎤 <i>Какой лимит файла?</i>")
+    assert "Лимит" in text
+    assert messenger.voices == []
+    assert messenger.actions[0] == "typing"
 
 
 def test_too_long_voice_is_rejected() -> None:

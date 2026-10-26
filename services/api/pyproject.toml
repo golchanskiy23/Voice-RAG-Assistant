@@ -34,6 +34,9 @@ dev = [
     "types-reportlab>=5.0.0.20261008",
     "websockets>=15",
 ]
+stt = [
+    "faster-whisper>=1.1",
+]
 local-models = [
     "faster-whisper>=1.1",
     "torch>=2.5",

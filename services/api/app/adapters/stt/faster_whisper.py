@@ -16,8 +16,11 @@ class FasterWhisperSTT:
         compute_type: str = "int8",
         language: str = "ru",
         beam_size: int = 1,
+        cpu_threads: int = 0,
     ) -> None:
-        self._model = WhisperModel(model, device=device, compute_type=compute_type)
+        self._model = WhisperModel(
+            model, device=device, compute_type=compute_type, cpu_threads=cpu_threads
+        )
         self._language = language
         self._beam_size = beam_size
         self._lock = asyncio.Lock()

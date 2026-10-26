@@ -41,9 +41,10 @@ class Settings(DatabaseSettings):
     rag_context_tokens: int = Field(default=3000, gt=0)
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     stt: Literal["stub", "faster-whisper"] = "stub"
-    whisper_model: str = "small"
+    whisper_model: str = "base"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+    whisper_cpu_threads: int = Field(default=2, ge=0)
     stt_partial_interval: float = Field(default=1.0, ge=0)
     vad: Literal["energy", "silero"] = "energy"
     vad_threshold_dbfs: float = -40.0
@@ -68,6 +69,7 @@ class Settings(DatabaseSettings):
     telegram_whitelist: str = ""
     telegram_rate_limit: int = Field(default=10, ge=1)
     telegram_max_voice_seconds: int = Field(default=60, gt=0)
+    telegram_voice_reply: bool = True
     embedder: Literal["hashing", "openai", "e5", "bge-m3"] = "hashing"
     embedder_device: str = "cpu"
     openai_api_key: SecretStr | None = None

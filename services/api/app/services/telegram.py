@@ -102,6 +102,7 @@ class TelegramBot:
         rate_limit: int = 10,
         max_voice_seconds: int = 60,
         library: Library | None = None,
+        voice_reply: bool = True,
     ) -> None:
         self._messenger = messenger
         self._dialog = dialog
@@ -112,6 +113,7 @@ class TelegramBot:
         self._rate_limit = rate_limit
         self._max_voice_seconds = max_voice_seconds
         self._library = library
+        self._voice_reply = voice_reply
 
     async def on_start(self, chat_id: int) -> None:
         if self._allowed(chat_id):
@@ -200,7 +202,7 @@ class TelegramBot:
                 chat_id, f"Голосовое длиннее {self._max_voice_seconds} с — разбейте вопрос."
             )
             return
-        async with self._action(chat_id, "record_voice"):
+        async with self._action(chat_id, "record_voice" if self._voice_reply else "typing"):
             try:
                 pcm = await decode_to_pcm(await self._messenger.download(file_id))
             except AppError:
@@ -218,7 +220,7 @@ class TelegramBot:
                 return
             await self._messenger.send_text(chat_id, format_answer(result.answer, heard))
             spoken = normalize_for_tts(result.answer.text)
-            if spoken:
+            if spoken and self._voice_reply:
                 ogg = await encode_ogg_opus(
                     await self._tts.synthesize(spoken), self._tts.sample_rate
                 )
