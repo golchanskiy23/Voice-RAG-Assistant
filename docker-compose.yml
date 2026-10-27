@@ -4,7 +4,11 @@ x-database-url: &database-url postgresql+asyncpg://${POSTGRES_USER:-rag}:${POSTG
 
 services:
   api:
-    build: ./services/api
+    build:
+      context: ./services/api
+      args:
+        WITH_CLAUDE_CODE: ${WITH_CLAUDE_CODE:-0}
+        WITH_STT: ${WITH_STT:-0}
     image: voice-rag-api:local
     environment:
       LLM_PROVIDER: ${LLM_PROVIDER:-stub}
@@ -15,14 +19,21 @@ services:
       GIGACHAT_MODEL: ${GIGACHAT_MODEL:-GigaChat-2}
       GIGACHAT_VERIFY_SSL: ${GIGACHAT_VERIFY_SSL:-true}
       LLM_TIMEOUT: ${LLM_TIMEOUT:-30}
+      CLAUDE_CODE_OAUTH_TOKEN:
+      CLAUDE_CODE_MODEL: ${CLAUDE_CODE_MODEL:-sonnet}
+      CLAUDE_CODE_EFFORT: ${CLAUDE_CODE_EFFORT:-low}
+      CLAUDE_CODE_TIMEOUT: ${CLAUDE_CODE_TIMEOUT:-120}
       LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-512}
       PROMPT_VERSION: ${PROMPT_VERSION:-v2}
       RAG_TOP_K: ${RAG_TOP_K:-5}
       RAG_MIN_SCORE: ${RAG_MIN_SCORE:-0.0}
       RAG_CONTEXT_TOKENS: ${RAG_CONTEXT_TOKENS:-3000}
+      RAG_FULL_CONTEXT_TOKENS: ${RAG_FULL_CONTEXT_TOKENS:-0}
+      RAG_GENERAL_FALLBACK: ${RAG_GENERAL_FALLBACK:-false}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       STT: ${STT:-stub}
-      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-2}
       WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
       VAD: ${VAD:-energy}
       VAD_MIN_SILENCE_MS: ${VAD_MIN_SILENCE_MS:-600}
@@ -50,11 +61,16 @@ services:
       REDIS_URL: redis://redis:6379/0
       TELEGRAM_TOKEN:
       TELEGRAM_SECRET:
+      TELEGRAM_MODE: ${TELEGRAM_MODE:-webhook}
       TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-}
       TELEGRAM_WHITELIST: ${TELEGRAM_WHITELIST:-}
+      TELEGRAM_VOICE_REPLY: ${TELEGRAM_VOICE_REPLY:-true}
       ADMIN_API_KEY: ${ADMIN_API_KEY:-dev-admin-key}
     ports:
       - "${API_PORT:-8000}:8000"
+    volumes:
+      - models:/models
+    mem_limit: ${API_MEMORY:-1536m}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -124,6 +140,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  models:
   postgres-data:
   qdrant-data:
   redis-data:

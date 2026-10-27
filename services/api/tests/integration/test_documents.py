@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -192,3 +193,41 @@ def test_concurrent_saves_of_same_file_create_one_document(migrated_database_url
 
     assert sorted(statuses) == ["created"] + ["exists"] * 9
     assert chunk_count == [(1,)]
+
+
+def test_list_and_delete_remove_document_from_both_stores(
+    settings: Settings, migrated_database_url: str
+) -> None:
+    auth = {API_KEY_HEADER: TEST_ADMIN_API_KEY}
+    with TestClient(create_app(settings=settings)) as client:
+        kept = upload(client, "kept.md", MARKDOWN).json()
+        removed = upload(client, "removed.pdf", PDF).json()
+        listed = client.get("/documents", headers=auth).json()["documents"]
+        deleted = client.delete(f"/documents/{removed['id']}", headers=auth)
+        search = client.post("/search", json={"query": "регламент документов", "k": 10})
+        missing = client.delete(f"/documents/{removed['id']}", headers=auth)
+
+    assert [d["filename"] for d in listed] == ["kept.md", "removed.pdf"]
+    assert listed[1]["pages"] == removed["pages"]
+    assert (deleted.status_code, missing.status_code) == (204, 404)
+    assert {c["document_id"] for c in search.json()["chunks"]} <= {kept["id"]}
+    chunk_documents = query(migrated_database_url, select(Chunk.document_id).distinct())
+    assert [str(r[0]) for r in chunk_documents] == [kept["id"]]
+
+
+def test_document_texts_return_whole_documents_in_order(settings: Settings) -> None:
+    with TestClient(create_app(settings=settings)) as client:
+        pdf = upload(client, "regulation.pdf", PDF).json()
+        guide = upload(client, "guide.md", MARKDOWN).json()
+        texts = client.app.state.texts  # type: ignore[attr-defined]
+        assert client.portal is not None
+        sizes = client.portal.call(texts.sizes)
+        ids = [uuid.UUID(guide["id"]), uuid.UUID(pdf["id"])]
+        chunks = client.portal.call(texts.chunks, ids)
+
+    assert list(sizes) == [uuid.UUID(pdf["id"]), uuid.UUID(guide["id"])]
+    assert all(size > 0 for size in sizes.values())
+    assert [c.filename for c in chunks] == ["guide.md"] * guide["chunks"] + [
+        "regulation.pdf"
+    ] * pdf["chunks"]
+    assert [c.ord for c in chunks if c.filename == "regulation.pdf"] == list(range(pdf["chunks"]))

@@ -24,6 +24,18 @@ class DocumentUploadResponse(BaseModel):
     status: Literal["created", "replaced", "exists"]
 
 
+class DocumentOut(BaseModel):
+    id: uuid.UUID
+    filename: str
+    mime: str
+    pages: int | None
+    chunks: int
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentOut]
+
+
 class SearchRequest(BaseModel):
     query: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=5, ge=1, le=50)

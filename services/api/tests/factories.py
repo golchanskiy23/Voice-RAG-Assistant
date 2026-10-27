@@ -97,6 +97,17 @@ class InMemoryDocumentRepository:
         self._pending = (stored, saved, old)
         return SaveResult(stored, "replaced" if old else "created", saved, [d.id for d in old])
 
+    async def list_all(self) -> list[StoredDocument]:
+        return list(self.documents.values())
+
+    async def delete(self, document_id: uuid.UUID) -> bool:
+        for sha256, document in list(self.documents.items()):
+            if document.id == document_id:
+                del self.documents[sha256]
+                self.chunks.pop(document_id, None)
+                return True
+        return False
+
     async def commit(self) -> None:
         if self._pending is not None:
             stored, saved, old = self._pending
@@ -144,6 +155,37 @@ class InMemoryKeywordIndex:
         return sorted(hits, key=lambda hit: hit.score, reverse=True)[:k]
 
 
+class InMemoryDocumentTexts:
+    def __init__(self, repository: InMemoryDocumentRepository) -> None:
+        self._repository = repository
+
+    async def sizes(self) -> dict[uuid.UUID, int]:
+        return {
+            d.id: sum(len(s.chunk.text) for s in self._repository.chunks.get(d.id, []))
+            for d in self._repository.documents.values()
+        }
+
+    async def chunks(self, document_ids: Sequence[uuid.UUID]) -> list[SearchHit]:
+        documents = {d.id: d for d in self._repository.documents.values()}
+        return [
+            SearchHit(
+                chunk_id=saved.id,
+                document_id=document_id,
+                filename=documents[document_id].filename,
+                ord=saved.chunk.ord,
+                text=saved.chunk.text,
+                page=saved.chunk.page,
+                section=saved.chunk.section,
+                score=1.0,
+                found_by=(),
+            )
+            for document_id in document_ids
+            for saved in sorted(
+                self._repository.chunks.get(document_id, []), key=lambda s: s.chunk.ord
+            )
+        ]
+
+
 def build_app(
     llm_factory: Callable[[], LLMClient] = StubLLMClient,
     database: FakeDatabase | None = None,
@@ -157,11 +199,12 @@ def build_app(
     fake_database = database or FakeDatabase()
     fake_qdrant = qdrant or FakeQdrant()
     repository = documents or InMemoryDocumentRepository()
-    keyword = InMemoryKeywordIndex(
+    memory = (
         repository
         if isinstance(repository, InMemoryDocumentRepository)
         else InMemoryDocumentRepository()
     )
+    keyword = InMemoryKeywordIndex(memory)
     app = create_app(
         settings=settings or make_settings(),
         llm_factory=llm_factory,
@@ -170,6 +213,7 @@ def build_app(
         embedder_factory=embedder_factory,
         count_tokens=count_tokens,
         keyword_factory=lambda _: keyword,
+        texts_factory=lambda _: InMemoryDocumentTexts(memory),
         stt_factory=stt_factory,
         tts_factory=StubTTS,
     )

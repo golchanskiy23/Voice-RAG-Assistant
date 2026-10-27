@@ -130,3 +130,25 @@ def load_answer_prompt(prompts_dir: Path, version: str) -> AnswerPrompt:
         chunk=Template(read("chunk")),
         examples=load_examples(folder / "examples.json"),
     )
+
+
+@dataclass(frozen=True)
+class GeneralPrompt:
+    version: str
+    system: str
+    user: Template
+
+    def messages(self, question: str) -> tuple[ChatMessage, ...]:
+        return (
+            ChatMessage("system", self.system),
+            ChatMessage("user", self.user.substitute(question=question)),
+        )
+
+
+def load_general_prompt(prompts_dir: Path, version: str = "v1") -> GeneralPrompt:
+    folder = prompts_dir / "general" / version
+    return GeneralPrompt(
+        version=f"general/{version}",
+        system=(folder / "system.md").read_text(encoding="utf-8").strip(),
+        user=Template((folder / "user.md").read_text(encoding="utf-8").strip()),
+    )

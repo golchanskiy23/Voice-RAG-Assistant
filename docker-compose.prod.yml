@@ -13,14 +13,12 @@ services:
       context: ./services/api
       args:
         WITH_LOCAL_MODELS: ${WITH_LOCAL_MODELS:-0}
+        WITH_CLAUDE_CODE: ${WITH_CLAUDE_CODE:-0}
+        WITH_STT: ${WITH_STT:-0}
     ports: !reset []
     environment:
       TELEGRAM_WEBHOOK_URL: https://${DOMAIN}/telegram/webhook
-      HF_HOME: /models/hf
-      TORCH_HOME: /models/torch
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    volumes:
-      - models:/models
     mem_limit: ${API_MEMORY:-2560m}
     restart: always
     logging: *logging
@@ -67,6 +65,5 @@ services:
     logging: *logging
 
 volumes:
-  models:
   caddy-data:
   caddy-config:

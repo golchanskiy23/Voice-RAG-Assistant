@@ -1,4 +1,5 @@
 import time
+import uuid
 from collections.abc import AsyncGenerator, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TypedDict, cast
@@ -8,12 +9,14 @@ import structlog
 from app.adapters.llm.base import (
     ChatMessage,
     LLMClient,
+    LLMError,
     LLMRequest,
     StreamEnd,
     TextDelta,
     Usage,
 )
 from app.adapters.vector_stores.base import SearchHit
+from app.repositories.document_texts import DocumentTexts
 from app.services.context import fit_to_budget, make_quote
 from app.services.llm_answer import (
     ANSWER_SCHEMA,
@@ -23,13 +26,18 @@ from app.services.llm_answer import (
     LLMAnswer,
     parse_llm_answer,
 )
-from app.services.prompts import AnswerPrompt
+from app.services.prompts import AnswerPrompt, GeneralPrompt
 from app.services.search import SearchService
 
 log = structlog.get_logger()
+CHARS_PER_TOKEN = 3
+LOGGED_CHUNKS = 20
+GENERAL_PREFIX = "📚 В документах этого нет. Из общих знаний модели:\n"
 
 
 class Latency(TypedDict, total=False):
+    documents: float
+    general: float
     embed: float
     search: float
     bm25: float
@@ -80,6 +88,7 @@ class RAGSettings:
     top_k: int = 5
     min_score: float = 0.0
     context_tokens: int = 3000
+    full_context_tokens: int = 0
     max_tokens: int = 512
     temperature: float = 0.0
 
@@ -126,16 +135,22 @@ class RAGService:
         prompt: AnswerPrompt,
         count_tokens: Callable[[str], int],
         settings: RAGSettings | None = None,
+        texts: DocumentTexts | None = None,
+        general: GeneralPrompt | None = None,
     ) -> None:
+        self._texts = texts
+        self._general = general
         self._search = search
         self._llm = llm
         self._prompt = prompt
         self._count_tokens = count_tokens
         self._settings = settings or RAGSettings()
 
-    async def answer(self, question: str) -> Answer:
+    async def answer(
+        self, question: str, document_ids: Sequence[uuid.UUID] | None = None
+    ) -> Answer:
         start = time.perf_counter()
-        retrieval = await self._retrieve(question)
+        retrieval = await self._retrieve(question, document_ids)
         latency = retrieval.latency_ms
         generation = Generation(refusal())
         if retrieval.hits:
@@ -143,10 +158,16 @@ class RAGService:
             generation = await self._generate(self._messages(question, retrieval.hits), retrieval)
             latency["llm"] = elapsed_ms(llm_start)
         result = grounded(generation.result)
+        text = result.answer
+        if self._general is not None and text == NO_ANSWER:
+            general_start = time.perf_counter()
+            general = await self._general_answer(self._general, question)
+            latency["general"] = elapsed_ms(general_start)
+            text = f"{GENERAL_PREFIX}{general}" if general else text
         latency["total"] = elapsed_ms(start)
         self._log("rag_answer", question, retrieval, generation, result, latency)
         return Answer(
-            text=result.answer,
+            text=text,
             sources=cited_sources(result, retrieval.hits),
             confidence=result.confidence,
             latency_ms=latency,
@@ -191,13 +212,58 @@ class RAGService:
             latency_ms=latency,
         )
 
-    async def _retrieve(self, question: str) -> Retrieval:
-        found = await self._search.search(question, self._settings.top_k)
+    async def _retrieve(
+        self, question: str, document_ids: Sequence[uuid.UUID] | None = None
+    ) -> Retrieval:
+        if self._texts is not None and self._settings.full_context_tokens > 0:
+            started = time.perf_counter()
+            whole = await self._whole_documents(self._texts, question, document_ids)
+            if whole:
+                return Retrieval(hits=whole, latency_ms={"documents": elapsed_ms(started)})
+        found = await self._search.search(question, self._settings.top_k, document_ids)
         relevant = [hit for hit in found.hits if hit.score >= self._settings.min_score]
         budget = self._settings.context_tokens
         hits = fit_to_budget(relevant, budget, self._count_tokens, self._prompt.render_chunk)
         latency = cast(Latency, dict(found.latency_ms))
         return Retrieval(hits=hits, latency_ms=latency)
+
+    async def _general_answer(self, prompt: GeneralPrompt, question: str) -> str:
+        request = LLMRequest(
+            messages=prompt.messages(question),
+            max_tokens=self._settings.max_tokens,
+            temperature=self._settings.temperature,
+        )
+        try:
+            completion = await self._llm.complete(request)
+        except LLMError:
+            log.warning("general_answer_failed", stage="general")
+            return ""
+        log.info(
+            "general_answer",
+            stage="general",
+            provider=completion.provider,
+            prompt_version=prompt.version,
+        )
+        return completion.text.strip()
+
+    async def _whole_documents(
+        self,
+        texts: DocumentTexts,
+        question: str,
+        document_ids: Sequence[uuid.UUID] | None,
+    ) -> list[SearchHit]:
+        sizes = await texts.sizes()
+        budget = self._settings.full_context_tokens * CHARS_PER_TOKEN
+        candidates = [d for d in document_ids if d in sizes] if document_ids else list(sizes)
+        if sum(sizes[d] for d in candidates) > budget:
+            if document_ids:
+                return []
+            found = await self._search.search(question, self._settings.top_k * 4)
+            candidates = []
+            for document_id in dict.fromkeys(hit.document_id for hit in found.hits):
+                if sum(sizes[d] for d in candidates) + sizes[document_id] <= budget:
+                    candidates.append(document_id)
+        return await texts.chunks(candidates) if candidates else []
 
     def _messages(self, question: str, hits: Sequence[SearchHit]) -> tuple[ChatMessage, ...]:
         return self._prompt.messages(question, hits)
@@ -244,7 +310,9 @@ class RAGService:
         log.info(
             event,
             stage="answer",
-            chunk_ids=[str(hit.chunk_id) for hit in retrieval.hits],
+            chunks=len(retrieval.hits),
+            documents=len({hit.document_id for hit in retrieval.hits}),
+            chunk_ids=[str(hit.chunk_id) for hit in retrieval.hits[:LOGGED_CHUNKS]],
             sources=result.sources,
             answered=result.answer != NO_ANSWER,
             provider=generation.provider,

@@ -12,7 +12,7 @@ class DatabaseSettings(BaseSettings):
     database_url: PostgresDsn
 
 
-LLMProvider = Literal["stub", "openai", "gigachat"]
+LLMProvider = Literal["stub", "openai", "gigachat", "claude-code"]
 
 PROMPTS_DIR = Path(__file__).resolve().parents[2] / "prompts"
 
@@ -29,16 +29,24 @@ class Settings(DatabaseSettings):
     gigachat_model: str = "GigaChat-2"
     gigachat_verify_ssl: bool = True
     gigachat_ca_bundle_file: str | None = None
+    claude_code_bin: str = "claude"
+    claude_code_model: str = "sonnet"
+    claude_code_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    claude_code_timeout: float = Field(default=120.0, gt=0)
+    claude_code_concurrency: int = Field(default=2, ge=1, le=16)
     prompts_dir: Path = PROMPTS_DIR
     prompt_version: str = "v2"
     rag_top_k: int = Field(default=5, ge=1, le=50)
     rag_min_score: float = 0.0
     rag_context_tokens: int = Field(default=3000, gt=0)
+    rag_full_context_tokens: int = Field(default=0, ge=0)
+    rag_general_fallback: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     stt: Literal["stub", "faster-whisper"] = "stub"
-    whisper_model: str = "small"
+    whisper_model: str = "base"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+    whisper_cpu_threads: int = Field(default=2, ge=0)
     stt_partial_interval: float = Field(default=1.0, ge=0)
     vad: Literal["energy", "silero"] = "energy"
     vad_threshold_dbfs: float = -40.0
@@ -57,11 +65,13 @@ class Settings(DatabaseSettings):
     dialog_ttl_seconds: int = Field(default=86_400, gt=0)
     rewrite_enabled: bool = True
     telegram_token: SecretStr | None = None
+    telegram_mode: Literal["webhook", "polling"] = "webhook"
     telegram_secret: SecretStr | None = None
     telegram_webhook_url: str | None = None
     telegram_whitelist: str = ""
     telegram_rate_limit: int = Field(default=10, ge=1)
     telegram_max_voice_seconds: int = Field(default=60, gt=0)
+    telegram_voice_reply: bool = True
     embedder: Literal["hashing", "openai", "e5", "bge-m3"] = "hashing"
     embedder_device: str = "cpu"
     openai_api_key: SecretStr | None = None
@@ -121,7 +131,8 @@ class Settings(DatabaseSettings):
 
     @model_validator(mode="after")
     def telegram_requires_secret(self) -> Self:
-        if self.telegram_token is not None and self.telegram_secret is None:
+        webhook = self.telegram_mode == "webhook"
+        if self.telegram_token is not None and webhook and self.telegram_secret is None:
             raise ValueError("для TELEGRAM_TOKEN нужен TELEGRAM_SECRET (проверка вебхука)")
         return self
 

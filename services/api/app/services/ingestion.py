@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import hashlib
+import uuid
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Literal
@@ -135,3 +136,12 @@ class IngestionService:
         with contextlib.suppress(Exception):
             await self._index.delete_documents(saved.replaced)
         return UploadResult(saved.document, saved.status)
+
+    async def list_documents(self) -> list[StoredDocument]:
+        return await self._documents.list_all()
+
+    async def delete(self, document_id: uuid.UUID) -> None:
+        if not await self._documents.delete(document_id):
+            raise AppError("not_found", "Документ не найден", status_code=404)
+        await self._index.delete_documents([document_id])
+        await self._documents.commit()

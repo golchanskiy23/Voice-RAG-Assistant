@@ -2,6 +2,7 @@ import asyncio
 import math
 import shutil
 import subprocess
+import uuid
 from array import array
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -14,12 +15,16 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
 from app.adapters.dialog.memory import InMemoryDialogStore
+from app.adapters.llm.base import Completion, LLMError, LLMRequest
 from app.adapters.stt.stub import StubSTT
 from app.adapters.telegram.aiogram import AiogramGateway
 from app.adapters.tts.stub import StubTTS
 from app.api.routes.telegram import SECRET_HEADER
 from app.core.config import PROMPTS_DIR
+from app.core.errors import AppError
+from app.repositories.documents import StoredDocument
 from app.services.dialog import DialogService, QueryRewriter, load_rewrite_prompt
+from app.services.ingestion import UploadResult
 from app.services.telegram import ChatAction, TelegramBot, format_answer
 from tests.factories import build_app, make_settings
 from tests.llm_fakes import ScriptedLLM, hit, make_service
@@ -47,10 +52,35 @@ class FakeMessenger:
         return self.voice
 
 
+class FakeLibrary:
+    def __init__(self) -> None:
+        self.uploads: list[tuple[str, bytes]] = []
+        self.stored: list[StoredDocument] = []
+
+    async def upload(self, filename: str, content: bytes) -> UploadResult:
+        if filename == "broken.pdf":
+            raise AppError("pdf_unreadable", "Не удалось прочитать PDF", status_code=422)
+        self.uploads.append((filename, content))
+        document = StoredDocument(uuid.uuid4(), filename, "sha", "application/pdf", 3, 7)
+        self.stored.append(document)
+        return UploadResult(document, "created")
+
+    async def list_documents(self) -> list[StoredDocument]:
+        return self.stored
+
+    async def delete(self, document_id: uuid.UUID) -> None:
+        self.stored = [d for d in self.stored if d.id != document_id]
+
+
 def make_bot(
-    messenger: FakeMessenger, whitelist: frozenset[int] = frozenset(), rate_limit: int = 10
+    messenger: FakeMessenger,
+    whitelist: frozenset[int] = frozenset(),
+    rate_limit: int = 10,
+    library: FakeLibrary | None = None,
+    llm: ScriptedLLM | None = None,
+    voice_reply: bool = True,
 ) -> TelegramBot:
-    llm = ScriptedLLM([ANSWER] * 20)
+    llm = llm or ScriptedLLM([ANSWER] * 20)
     store = InMemoryDialogStore()
     dialog = DialogService(
         store,
@@ -65,6 +95,8 @@ def make_bot(
         StubTTS(),
         whitelist,
         rate_limit,
+        library=library,
+        voice_reply=voice_reply,
     )
 
 
@@ -132,6 +164,19 @@ def test_voice_message_gets_text_and_voice_reply() -> None:
     [(_, ogg)] = messenger.voices
     assert ogg[:4] == b"OggS"
     assert messenger.actions[0] == "record_voice"
+
+
+def test_voice_question_gets_text_only_reply_when_voice_reply_off() -> None:
+    messenger = FakeMessenger(voice=tone_ogg())
+
+    asyncio.run(make_bot(messenger, voice_reply=False).on_voice(1, 1, "file-1", duration=1))
+
+    [(_, text)] = messenger.texts
+    assert text.startswith("🎤 <i>Какой лимит файла?</i>")
+    assert "Лимит" in text
+    assert "Источники" not in text
+    assert messenger.voices == []
+    assert messenger.actions[0] == "typing"
 
 
 def test_too_long_voice_is_rejected() -> None:
@@ -272,3 +317,180 @@ def test_settings_require_secret_with_token() -> None:
         make_settings().model_validate(
             {**make_settings().model_dump(), "telegram_token": "1:x", "telegram_secret": None}
         )
+
+
+def test_document_is_indexed_and_caption_answered() -> None:
+    messenger = FakeMessenger(voice=b"%PDF-1.7")
+    library = FakeLibrary()
+    bot = make_bot(messenger, whitelist=frozenset({1}), library=library)
+
+    asyncio.run(bot.on_document(1, 1, "file-1", "guide.pdf", 100, "Какой лимит?"))
+
+    assert library.uploads == [("guide.pdf", b"%PDF-1.7")]
+    assert "<b>guide.pdf</b> добавлен в базу (страниц: 3, фрагментов: 7)" in messenger.texts[0][1]
+    assert "Лимит" in messenger.texts[1][1]
+    assert "upload_document" in messenger.actions
+
+
+def test_document_upload_needs_whitelist_and_shows_chat_id() -> None:
+    messenger = FakeMessenger()
+    library = FakeLibrary()
+
+    asyncio.run(make_bot(messenger, library=library).on_document(5, 5, "f", "a.pdf", 10))
+
+    assert library.uploads == []
+    assert "<code>5</code>" in messenger.texts[0][1]
+
+
+@pytest.mark.parametrize(
+    ("filename", "size", "reply"),
+    [
+        ("notes.docx", 10, "только PDF и Markdown"),
+        ("big.pdf", 30 * 1024 * 1024, "больше 20 МБ"),
+        ("broken.pdf", 10, "Не удалось прочитать PDF"),
+    ],
+)
+def test_document_rejections(filename: str, size: int, reply: str) -> None:
+    messenger = FakeMessenger()
+    bot = make_bot(messenger, whitelist=frozenset({1}), library=FakeLibrary())
+
+    asyncio.run(bot.on_document(1, 1, "f", filename, size))
+
+    assert reply in messenger.texts[-1][1]
+
+
+def test_docs_lists_documents() -> None:
+    messenger = FakeMessenger()
+    library = FakeLibrary()
+    bot = make_bot(messenger, whitelist=frozenset({1}), library=library)
+
+    async def run() -> None:
+        await bot.on_docs(1)
+        await bot.on_document(1, 1, "f", "guide.md", 10)
+        await bot.on_docs(1)
+
+    asyncio.run(run())
+    assert "База пуста" in messenger.texts[0][1]
+    assert "1. <b>guide.md</b> — фрагментов: 7" in messenger.texts[-1][1]
+
+
+def test_aiogram_dispatches_document() -> None:
+    bot = Bot("42:TEST", session=RecordingSession())
+    messenger = FakeMessenger(voice=b"# Doc")
+    library = FakeLibrary()
+    gateway = AiogramGateway(bot, make_bot(messenger, frozenset({1}), library=library))
+    payload = update(1, "")
+    del payload["message"]["text"]
+    payload["message"]["document"] = {
+        "file_id": "doc-1",
+        "file_unique_id": "u1",
+        "file_name": "guide.md",
+        "file_size": 5,
+    }
+
+    asyncio.run(gateway.process(payload))
+
+    assert library.uploads == [("guide.md", b"# Doc")]
+
+
+def test_polling_mode_needs_no_secret_and_disables_webhook() -> None:
+    settings = make_settings().model_validate(
+        {**make_settings().model_dump(), "telegram_token": "1:x", "telegram_mode": "polling"}
+    )
+    assert settings.telegram_secret is None
+
+    app = build_app(settings=make_settings().model_copy(update={"telegram_mode": "polling"}))
+    with TestClient(app) as client:
+        app.state.telegram = RecordingProcessor()
+        response = client.post("/telegram/webhook", json=update(1, "q"))
+
+    assert response.status_code == 404
+
+
+class FailingSession(RecordingSession):
+    async def make_request(
+        self,
+        bot: Bot,
+        method: TelegramMethod[Any],
+        timeout: int | None = None,  # noqa: ASYNC109
+    ) -> Any:
+        raise RuntimeError("Unauthorized")
+
+
+def test_polling_failure_marks_bot_not_ready() -> None:
+    bot = Bot("42:TEST", session=FailingSession())
+    gateway = AiogramGateway(bot, make_bot(FakeMessenger()))
+
+    async def run() -> tuple[bool, bool]:
+        gateway.start_polling()
+        started = await gateway.is_ready()
+        await asyncio.sleep(0.05)
+        failed = await gateway.is_ready()
+        await gateway.close()
+        return started, failed
+
+    assert asyncio.run(run()) == (True, False)
+
+
+def test_app_starts_with_telegram_token() -> None:
+    settings = make_settings().model_copy(
+        update={"telegram_token": SecretStr("42:TEST"), "telegram_secret": SecretStr("s")}
+    )
+    app = build_app(settings=settings)
+
+    with TestClient(app):
+        assert isinstance(app.state.telegram, AiogramGateway)
+
+
+class DownLLM(ScriptedLLM):
+    async def complete(self, request: LLMRequest) -> Completion:
+        raise LLMError("claude-code", "Not logged in")
+
+
+def test_llm_failure_is_reported_to_user() -> None:
+    messenger = FakeMessenger()
+
+    asyncio.run(make_bot(messenger, llm=DownLLM([])).on_text(1, 1, "Какой лимит?"))
+
+    assert messenger.texts == [(1, "Модель сейчас недоступна, попробуйте позже.")]
+
+
+def test_ask_returns_503_when_llm_is_down() -> None:
+    with TestClient(build_app(llm_factory=lambda: DownLLM([]))) as client:
+        client.post(
+            "/documents",
+            files={"file": ("faq.md", "# FAQ\n\nЛимит файла 20 МБ.".encode())},
+            headers={"X-API-Key": "test-admin-key"},
+        )
+        response = client.post("/ask", json={"question": "Какой лимит файла?"})
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "llm_unavailable"
+
+
+def test_delete_command_removes_document_by_number() -> None:
+    messenger = FakeMessenger()
+    library = FakeLibrary()
+    bot = make_bot(messenger, whitelist=frozenset({1}), library=library)
+
+    async def run() -> None:
+        await bot.on_document(1, 1, "f", "a.md", 10)
+        await bot.on_document(1, 1, "f", "b.md", 10)
+        await bot.on_delete(1, "1")
+        await bot.on_delete(1, "7")
+
+    asyncio.run(run())
+    assert [d.filename for d in library.stored] == ["b.md"]
+    assert "<b>a.md</b> удалён из базы" in messenger.texts[-2][1]
+    assert "/delete 2" in messenger.texts[-1][1]
+
+
+def test_uploaded_document_is_remembered_in_dialog_history() -> None:
+    messenger = FakeMessenger()
+    bot = make_bot(messenger, whitelist=frozenset({1}), library=FakeLibrary())
+    store: InMemoryDialogStore = bot._store  # type: ignore[assignment]
+
+    asyncio.run(bot.on_document(1, 1, "f", "book.pdf", 10))
+
+    history = asyncio.run(store.history("tg:1"))
+    assert [t.text for t in history] == ["Загружен документ «book.pdf»."]

@@ -1,7 +1,9 @@
+import uuid
+
 from fastapi import APIRouter, Response, UploadFile, status
 
 from app.api.deps import IngestionServiceDep
-from app.api.schemas import DocumentUploadResponse
+from app.api.schemas import DocumentListResponse, DocumentOut, DocumentUploadResponse
 from app.api.security import AdminKey
 from app.core.errors import AppError
 from app.services import ingestion
@@ -40,3 +42,20 @@ async def upload_document(
         pages=result.document.pages,
         status=result.status,
     )
+
+
+@router.get("")
+async def list_documents(service: IngestionServiceDep) -> DocumentListResponse:
+    documents = await service.list_documents()
+    return DocumentListResponse(
+        documents=[
+            DocumentOut(id=d.id, filename=d.filename, mime=d.mime, pages=d.pages, chunks=d.chunks)
+            for d in documents
+        ]
+    )
+
+
+@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_document(document_id: uuid.UUID, service: IngestionServiceDep) -> Response:
+    await service.delete(document_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

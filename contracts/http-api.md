@@ -9,11 +9,22 @@
 `session_id` пространство имён `api:`; история Telegram — `tg:<chat_id>`, не пересекаются.
 Сейчас история учитывается только в `/ask`; `/ask/stream` и `/ws/voice` отвечают без истории.
 
+С `RAG_GENERAL_FALLBACK=true`, если в документах ответа нет, `answer` начинается с
+«📚 В документах этого нет. Из общих знаний модели:», `sources` пуст, `confidence` 0. Только `/ask` и бот;
+`/ask/stream` и `/ws/voice` по-прежнему отказывают.
+
+`/ask` при недоступном LLM (после ретраев и fallback) → 503 `llm_unavailable`.
+
+## `GET /documents`, `DELETE /documents/{id}`
+
+С `X-API-Key`. `GET` → `{documents: [{id, filename, mime, pages, chunks}]}` в порядке загрузки.
+`DELETE` удаляет документ и чанки из Postgres и Qdrant → 204; неизвестный `id` → 404 `not_found`.
+
 ## `POST /telegram/webhook`
 
 Только для Telegram. Заголовок `X-Telegram-Bot-Api-Secret-Token` обязан совпасть с `TELEGRAM_SECRET`, иначе 401.
 Тело — `Update` Bot API. Ответ `{"ok": true}` сразу; обработка — в фоне. Повтор того же `update_id` в течение
-часа не обрабатывается (дедуп в Redis). Без `TELEGRAM_TOKEN` — 404.
+часа не обрабатывается (дедуп в Redis). Без `TELEGRAM_TOKEN` или при `TELEGRAM_MODE=polling` — 404.
 
 ## `/search`
 

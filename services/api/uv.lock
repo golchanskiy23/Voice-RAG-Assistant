@@ -3278,6 +3278,9 @@ local-models = [
     { name = "torch", version = "2.14.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
     { name = "transformers" },
 ]
+stt = [
+    { name = "faster-whisper" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -3317,6 +3320,7 @@ local-models = [
     { name = "torch", specifier = ">=2.5", index = "https://download.pytorch.org/whl/cpu" },
     { name = "transformers", specifier = ">=4.46" },
 ]
+stt = [{ name = "faster-whisper", specifier = ">=1.1" }]
 
 [[package]]
 name = "watchfiles"
