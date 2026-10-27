@@ -127,6 +127,24 @@ def test_first_question_skips_rewrite() -> None:
     assert len(llm.requests) == 1
 
 
+def test_question_about_document_ignores_history() -> None:
+    llm = RewritingLLM([ANSWER])
+    store = InMemoryDialogStore()
+    document = hit("Книга о недостатках Unix.", filename="unix.pdf")
+    service = DialogService(
+        store, QueryRewriter(llm, REWRITE_PROMPT), make_service(llm, [document])
+    )
+
+    async def run() -> str:
+        await store.append("s", [Turn("user", "о чём лабораторная?"), Turn("assistant", "Холл.")])
+        result = await service.answer("s", "о чём этот файл?", [document.document_id])
+        return result.standalone_question
+
+    assert asyncio.run(run()) == "о чём этот файл?"
+    [answer] = llm.requests
+    assert answer.json_schema is not None and answer.json_schema.name == "rag_answer"
+
+
 class BrokenRewriteLLM(ScriptedLLM):
     async def complete(self, request: LLMRequest) -> Completion:
         raise LLMError("broken", "down")

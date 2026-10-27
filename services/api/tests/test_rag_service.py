@@ -2,8 +2,12 @@ import asyncio
 
 import structlog
 
+from app.adapters.llm.base import Completion, LLMError, LLMRequest
+from app.core.config import PROMPTS_DIR
 from app.services.llm_answer import NO_ANSWER
+from app.services.prompts import load_general_prompt
 from app.services.rag import (
+    GENERAL_PREFIX,
     FinalEvent,
     RAGService,
     RAGSettings,
@@ -11,7 +15,8 @@ from app.services.rag import (
     StreamEvent,
     TokenEvent,
 )
-from tests.llm_fakes import PROMPT, ScriptedLLM, hit, make_service
+from tests.factories import count_words
+from tests.llm_fakes import PROMPT, ScriptedLLM, hit, make_search, make_service
 
 HITS = [
     hit("Файлы больше двадцати мегабайт отклоняются.", filename="faq.md", page=2),
@@ -155,3 +160,55 @@ def test_info_log_has_metadata_but_not_question() -> None:
     assert (entry["prompt_tokens"], entry["completion_tokens"]) == (100, 20)
     assert "секретный вопрос" not in str(entry)
     assert all(e["log_level"] == "debug" for e in logs if "секретный вопрос" in str(e))
+
+
+GENERAL = load_general_prompt(PROMPTS_DIR)
+REFUSAL = '{"answer": "В документах нет ответа на этот вопрос.", "sources": [], "confidence": 0}'
+
+
+def general_service(llm: ScriptedLLM) -> RAGService:
+    return RAGService(make_search(HITS), llm, PROMPT, count_words, general=GENERAL)
+
+
+def test_general_knowledge_answers_when_documents_do_not() -> None:
+    llm = ScriptedLLM([REFUSAL, "Лука Модрич."])
+
+    answer = asyncio.run(general_service(llm).answer("Кто получил Золотой мяч в 2018?"))
+
+    assert answer.text == f"{GENERAL_PREFIX}Лука Модрич."
+    assert answer.sources == []
+    _, general = llm.requests
+    assert general.json_schema is None
+    assert general.messages[-1].content == "Вопрос: Кто получил Золотой мяч в 2018?"
+    assert "general" in answer.latency_ms
+
+
+def test_document_answer_does_not_call_general_knowledge() -> None:
+    llm = ScriptedLLM([VALID])
+
+    answer = asyncio.run(general_service(llm).answer("Какой лимит?"))
+
+    assert answer.text == "Лимит — 20 МБ [1]."
+    assert len(llm.requests) == 1
+
+
+def test_general_knowledge_is_off_by_default() -> None:
+    llm = ScriptedLLM([REFUSAL, "не должен вызываться"])
+
+    answer = asyncio.run(make_service(llm, HITS).answer("Кто получил Золотой мяч?"))
+
+    assert answer.text == NO_ANSWER
+    assert len(llm.requests) == 1
+
+
+class GeneralDownLLM(ScriptedLLM):
+    async def complete(self, request: LLMRequest) -> Completion:
+        if request.json_schema is None:
+            raise LLMError(self.name, "down")
+        return await super().complete(request)
+
+
+def test_general_knowledge_failure_keeps_refusal() -> None:
+    answer = asyncio.run(general_service(GeneralDownLLM([REFUSAL])).answer("Кто?"))
+
+    assert answer.text == NO_ANSWER

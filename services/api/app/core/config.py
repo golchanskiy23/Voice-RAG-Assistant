@@ -39,6 +39,8 @@ class Settings(DatabaseSettings):
     rag_top_k: int = Field(default=5, ge=1, le=50)
     rag_min_score: float = 0.0
     rag_context_tokens: int = Field(default=3000, gt=0)
+    rag_full_context_tokens: int = Field(default=0, ge=0)
+    rag_general_fallback: bool = False
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     stt: Literal["stub", "faster-whisper"] = "stub"
     whisper_model: str = "base"

@@ -68,6 +68,9 @@ class FakeLibrary:
     async def list_documents(self) -> list[StoredDocument]:
         return self.stored
 
+    async def delete(self, document_id: uuid.UUID) -> None:
+        self.stored = [d for d in self.stored if d.id != document_id]
+
 
 def make_bot(
     messenger: FakeMessenger,
@@ -171,6 +174,7 @@ def test_voice_question_gets_text_only_reply_when_voice_reply_off() -> None:
     [(_, text)] = messenger.texts
     assert text.startswith("🎤 <i>Какой лимит файла?</i>")
     assert "Лимит" in text
+    assert "Источники" not in text
     assert messenger.voices == []
     assert messenger.actions[0] == "typing"
 
@@ -462,3 +466,31 @@ def test_ask_returns_503_when_llm_is_down() -> None:
 
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "llm_unavailable"
+
+
+def test_delete_command_removes_document_by_number() -> None:
+    messenger = FakeMessenger()
+    library = FakeLibrary()
+    bot = make_bot(messenger, whitelist=frozenset({1}), library=library)
+
+    async def run() -> None:
+        await bot.on_document(1, 1, "f", "a.md", 10)
+        await bot.on_document(1, 1, "f", "b.md", 10)
+        await bot.on_delete(1, "1")
+        await bot.on_delete(1, "7")
+
+    asyncio.run(run())
+    assert [d.filename for d in library.stored] == ["b.md"]
+    assert "<b>a.md</b> удалён из базы" in messenger.texts[-2][1]
+    assert "/delete 2" in messenger.texts[-1][1]
+
+
+def test_uploaded_document_is_remembered_in_dialog_history() -> None:
+    messenger = FakeMessenger()
+    bot = make_bot(messenger, whitelist=frozenset({1}), library=FakeLibrary())
+    store: InMemoryDialogStore = bot._store  # type: ignore[assignment]
+
+    asyncio.run(bot.on_document(1, 1, "f", "book.pdf", 10))
+
+    history = asyncio.run(store.history("tg:1"))
+    assert [t.text for t in history] == ["Загружен документ «book.pdf»."]

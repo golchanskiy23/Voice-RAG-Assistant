@@ -6,7 +6,7 @@ import structlog
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import BufferedInputFile, Message, Update
 
 from app.services.telegram import ChatAction, TelegramBot
@@ -51,6 +51,10 @@ def build_router(service: TelegramBot) -> Router:
     @router.message(Command("docs"))
     async def docs(message: Message) -> None:
         await service.on_docs(message.chat.id)
+
+    @router.message(Command("delete"))
+    async def delete(message: Message, command: CommandObject) -> None:
+        await service.on_delete(message.chat.id, command.args)
 
     @router.message(F.document)
     async def document(message: Message) -> None:

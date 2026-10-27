@@ -32,9 +32,10 @@ from app.core.logging import configure_logging
 from app.core.qdrant import Qdrant
 from app.core.request_id import request_id_middleware
 from app.core.tokens import count_llm_tokens
+from app.repositories.document_texts import DocumentTexts, PostgresDocumentTexts
 from app.repositories.fulltext import KeywordIndex, PostgresBM25
 from app.services.dialog import load_rewrite_prompt
-from app.services.prompts import load_answer_prompt
+from app.services.prompts import load_answer_prompt, load_general_prompt
 
 log = structlog.get_logger()
 
@@ -100,6 +101,7 @@ def create_app(
     embedder_factory: Callable[[], Embedder] | None = None,
     count_tokens: Callable[[str], int] = count_llm_tokens,
     keyword_factory: Callable[[Database], KeywordIndex] = PostgresBM25,
+    texts_factory: Callable[[Database], DocumentTexts] = PostgresDocumentTexts,
     reranker_factory: Callable[[], Reranker | None] | None = None,
     stt_factory: Callable[[], SpeechToText] | None = None,
     tts_factory: Callable[[], TextToSpeech] | None = None,
@@ -164,6 +166,7 @@ def create_app(
         app.state.vector_stores = vector_stores
         app.state.index = qdrant_store
         app.state.keyword = keyword_factory(database)
+        app.state.texts = texts_factory(database)
         app.state.reranker = reranker
         app.state.stt = stt
         app.state.tts = tts
@@ -175,6 +178,9 @@ def create_app(
         app.state.dialog_store = dialog_store
         app.state.rewrite_prompt = load_rewrite_prompt(resolved.prompts_dir)
         app.state.prompt = prompt
+        app.state.general_prompt = (
+            load_general_prompt(resolved.prompts_dir) if resolved.rag_general_fallback else None
+        )
         app.state.count_tokens = count_tokens
         app.state.telegram = None
         if resolved.telegram_token is not None:

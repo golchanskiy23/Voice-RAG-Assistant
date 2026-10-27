@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -212,3 +213,21 @@ def test_list_and_delete_remove_document_from_both_stores(
     assert {c["document_id"] for c in search.json()["chunks"]} <= {kept["id"]}
     chunk_documents = query(migrated_database_url, select(Chunk.document_id).distinct())
     assert [str(r[0]) for r in chunk_documents] == [kept["id"]]
+
+
+def test_document_texts_return_whole_documents_in_order(settings: Settings) -> None:
+    with TestClient(create_app(settings=settings)) as client:
+        pdf = upload(client, "regulation.pdf", PDF).json()
+        guide = upload(client, "guide.md", MARKDOWN).json()
+        texts = client.app.state.texts  # type: ignore[attr-defined]
+        assert client.portal is not None
+        sizes = client.portal.call(texts.sizes)
+        ids = [uuid.UUID(guide["id"]), uuid.UUID(pdf["id"])]
+        chunks = client.portal.call(texts.chunks, ids)
+
+    assert list(sizes) == [uuid.UUID(pdf["id"]), uuid.UUID(guide["id"])]
+    assert all(size > 0 for size in sizes.values())
+    assert [c.filename for c in chunks] == ["guide.md"] * guide["chunks"] + [
+        "regulation.pdf"
+    ] * pdf["chunks"]
+    assert [c.ord for c in chunks if c.filename == "regulation.pdf"] == list(range(pdf["chunks"]))

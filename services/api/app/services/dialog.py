@@ -1,3 +1,5 @@
+import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
@@ -105,12 +107,20 @@ class DialogService:
         self._rewriter = rewriter
         self._rag = rag
 
-    async def answer(self, session: str, question: str) -> DialogAnswer:
-        history = await self._store.history(session)
-        standalone = await self._rewriter.rewrite(question, history)
-        answer = await self._rag.answer(standalone)
+    async def answer(
+        self, session: str, question: str, document_ids: Sequence[uuid.UUID] | None = None
+    ) -> DialogAnswer:
+        if document_ids:
+            standalone = question
+        else:
+            history = await self._store.history(session)
+            standalone = await self._rewriter.rewrite(question, history)
+        answer = await self._rag.answer(standalone, document_ids)
         await self._store.append(session, [Turn("user", question), Turn("assistant", answer.text)])
         return DialogAnswer(answer, standalone)
+
+    async def note_document(self, session: str, filename: str) -> None:
+        await self._store.append(session, [Turn("assistant", f"Загружен документ «{filename}».")])
 
     async def reset(self, session: str) -> None:
         await self._store.clear(session)

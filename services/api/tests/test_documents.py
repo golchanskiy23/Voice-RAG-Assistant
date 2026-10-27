@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import uuid
 from collections.abc import Iterator
@@ -8,9 +9,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.adapters.embedders.base import EMBEDDING_DIM
+from app.api.deps import rag_service_from_state
 from app.api.security import API_KEY_HEADER
 from app.services import ingestion
-from tests.factories import TEST_ADMIN_API_KEY, InMemoryDocumentRepository, build_app
+from tests.factories import (
+    TEST_ADMIN_API_KEY,
+    InMemoryDocumentRepository,
+    build_app,
+    make_settings,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PDF = (FIXTURES / "regulation_ru.pdf").read_bytes()
@@ -222,3 +229,58 @@ def test_delete_unknown_document_is_not_found(client: TestClient) -> None:
 
 def test_list_requires_admin_key(client: TestClient) -> None:
     assert client.get("/documents").status_code == 401
+
+
+LAB = "# Лабораторная\n\nЦель работы: изучение эффекта Холла в полупроводниках.".encode()
+BOOK = b"# The Book\n\n## Foreword\n\nThis foreword was written by Donald Norman."
+
+
+def full_context_client(repository: InMemoryDocumentRepository) -> TestClient:
+    settings = make_settings().model_copy(update={"rag_full_context_tokens": 1000})
+    return TestClient(build_app(documents=repository, settings=settings))
+
+
+def test_whole_base_goes_to_llm_when_it_fits(repository: InMemoryDocumentRepository) -> None:
+    with full_context_client(repository) as client:
+        upload(client, "lab.md", LAB)
+        upload(client, "book.md", BOOK)
+        state = client.app.state  # type: ignore[attr-defined]
+        answer = asyncio.run(rag_service_from_state(state).answer("Кто написал предисловие?"))
+
+    assert answer.latency_ms.keys() >= {"documents", "llm"}
+    assert "bm25" not in answer.latency_ms
+    assert [s.filename for s in answer.sources] == ["lab.md"]
+
+
+def test_question_about_document_reads_only_that_document(
+    repository: InMemoryDocumentRepository,
+) -> None:
+    with full_context_client(repository) as client:
+        upload(client, "lab.md", LAB)
+        book_id = upload(client, "book.md", BOOK).json()["id"]
+        state = client.app.state  # type: ignore[attr-defined]
+        rag = rag_service_from_state(state)
+        answer = asyncio.run(rag.answer("О чём этот документ?", [uuid.UUID(book_id)]))
+
+    assert [s.filename for s in answer.sources] == ["book.md"]
+    assert "Donald Norman" in answer.sources[0].quote
+
+
+def test_too_large_base_falls_back_to_search(repository: InMemoryDocumentRepository) -> None:
+    settings = make_settings().model_copy(update={"rag_full_context_tokens": 10})
+    with TestClient(build_app(documents=repository, settings=settings)) as client:
+        upload(client, "lab.md", LAB)
+        upload(client, "book.md", BOOK)
+        state = client.app.state  # type: ignore[attr-defined]
+        answer = asyncio.run(rag_service_from_state(state).answer("Donald Norman foreword"))
+
+    assert "bm25" in answer.latency_ms
+    assert [s.filename for s in answer.sources] == ["book.md"]
+
+
+def test_general_fallback_prompt_is_loaded_only_when_enabled() -> None:
+    enabled = make_settings().model_copy(update={"rag_general_fallback": True})
+    with TestClient(build_app(settings=enabled)) as client:
+        assert client.app.state.general_prompt.version == "general/v1"  # type: ignore[attr-defined]
+    with TestClient(build_app()) as client:
+        assert client.app.state.general_prompt is None  # type: ignore[attr-defined]

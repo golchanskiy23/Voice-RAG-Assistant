@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -12,6 +13,7 @@ from app.adapters.rerankers.base import Reranker
 from app.adapters.vector_stores.base import StoreName, VectorStore
 from app.core.config import Settings
 from app.core.database import Database
+from app.repositories.document_texts import DocumentTexts
 from app.repositories.documents import (
     DocumentRepository,
     SqlDocumentRepository,
@@ -21,7 +23,7 @@ from app.repositories.fulltext import KeywordIndex
 from app.services.chunking import Chunker
 from app.services.dialog import DialogService, NoRewrite, QueryRewriter
 from app.services.ingestion import IngestionService, UploadResult
-from app.services.prompts import AnswerPrompt
+from app.services.prompts import AnswerPrompt, GeneralPrompt
 from app.services.rag import RAGService, RAGSettings
 from app.services.search import SearchDefaults, SearchService
 
@@ -120,12 +122,24 @@ def get_token_counter(request: Request) -> Callable[[str], int]:
     return count_tokens
 
 
+def get_document_texts(request: Request) -> DocumentTexts:
+    texts: DocumentTexts = request.app.state.texts
+    return texts
+
+
+def get_general_prompt(request: Request) -> GeneralPrompt | None:
+    general: GeneralPrompt | None = request.app.state.general_prompt
+    return general
+
+
 def get_rag_service(
     settings: Annotated[Settings, Depends(get_settings_dep)],
     search: Annotated[SearchService, Depends(get_search_service)],
     llm: Annotated[LLMClient, Depends(get_llm)],
     prompt: Annotated[AnswerPrompt, Depends(get_prompt)],
     count_tokens: Annotated[Callable[[str], int], Depends(get_token_counter)],
+    texts: Annotated[DocumentTexts, Depends(get_document_texts)],
+    general: Annotated[GeneralPrompt | None, Depends(get_general_prompt)],
 ) -> RAGService:
     return RAGService(
         search,
@@ -136,14 +150,19 @@ def get_rag_service(
             top_k=settings.rag_top_k,
             min_score=settings.rag_min_score,
             context_tokens=settings.rag_context_tokens,
+            full_context_tokens=settings.rag_full_context_tokens,
             max_tokens=settings.llm_max_tokens,
             temperature=settings.llm_temperature,
         ),
+        texts,
+        general,
     )
 
 
 def rag_service_from_state(state: Any) -> RAGService:
     settings: Settings = state.settings
+    texts: DocumentTexts = state.texts
+    general: GeneralPrompt | None = state.general_prompt
     search = SearchService(
         state.embedder,
         state.vector_stores,
@@ -165,9 +184,12 @@ def rag_service_from_state(state: Any) -> RAGService:
             top_k=settings.rag_top_k,
             min_score=settings.rag_min_score,
             context_tokens=settings.rag_context_tokens,
+            full_context_tokens=settings.rag_full_context_tokens,
             max_tokens=settings.llm_max_tokens,
             temperature=settings.llm_temperature,
         ),
+        texts,
+        general,
     )
 
 
@@ -198,6 +220,10 @@ class StateLibrary:
     async def list_documents(self) -> list[StoredDocument]:
         async with ingestion_from_state(self._state) as service:
             return await service.list_documents()
+
+    async def delete(self, document_id: uuid.UUID) -> None:
+        async with ingestion_from_state(self._state) as service:
+            await service.delete(document_id)
 
 
 def get_dialog_service(request: Request) -> DialogService:
